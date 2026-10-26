@@ -21,7 +21,7 @@ cargo cov --summary-only                     # coverage via cargo-llvm-cov (alia
 cargo cov-html                               # HTML report in target/llvm-cov/html
 ```
 
-- Coverage aliases exclude `main.rs` and `service/testing.rs`. Set `TEST_DATABASE_URL` so that `repository/postgres.rs` is covered too.
+- Coverage aliases exclude `main.rs`, `service/testing.rs` and unit test files (`**/tests.rs`). Set `TEST_DATABASE_URL` so that `repository/postgres.rs` is covered too.
 
 - The Postgres integration test (`tests/postgres.rs`) silently skips unless `TEST_DATABASE_URL` is set. It runs migrations against that database.
 - Migrations in `backend/migrations/` are applied automatically at startup via `sqlx::migrate!`. Schema changes go in new numbered files; don't edit `0001_init.sql`.
@@ -81,12 +81,20 @@ The schema is a hybrid:
 - **The narrow `metrics` table:** `(run_id, name, value, unit)`, written in the same transaction that completes the run.
   - Every benchmark should put its headline numbers in `metrics`, so runs can be compared with plain SQL. Anything else goes in `details`.
 
+### Unit test layout
+
+Unit tests never live inline in the file they test. Each module declares `#[cfg(test)] mod tests;` as its last item, and the tests go in a separate file that the compiler resolves on its own (no `#[path]`):
+- For a leaf module `foo.rs`, the tests go in `foo/tests.rs`.
+- For a `dir/mod.rs` module, the tests go in `dir/tests.rs`.
+
+The tests file is still a child module, so `use super::*;` reaches private items. The top-level `backend/tests/` directory is only for integration tests against the public API.
+
 ### Test fakes
 
 `service/testing.rs` (compiled only for tests) provides in-memory repositories (`InMemoryModels`, `InMemoryRuns`, `InMemoryHardware`), `FakeLlama` (fixed 50 tok/s), `FakeSession`, `FakeHost`, `FakeGpu`, `FakeHealth` and `FakeLauncher`. Reuse these when testing services.
 
 Other test setups:
-- **Router tests** (`presentation/mod.rs`) build the real router on top of these fakes and drive it with `tower::ServiceExt::oneshot`.
+- **Router tests** (`presentation/tests.rs`) build the real router on top of these fakes and drive it with `tower::ServiceExt::oneshot`.
 - **`LlamaHttpClient` tests** run against an axum stand-in server on a random port.
 - **Launcher tests** use fake `llama-server` shell scripts.
 - `infra::gguf::tests::gguf_bytes` builds a minimal valid GGUF header.

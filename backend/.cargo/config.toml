@@ -1,4 +1,4 @@
-# Coverage via cargo-llvm-cov. Excludes the binary's wiring and the test fakes.
+# Coverage via cargo-llvm-cov. Excludes the binary's wiring, the test fakes and unit test files.
 [alias]
-cov = ["llvm-cov", "--ignore-filename-regex", "(main|service/testing)\\.rs"]
-cov-html = ["llvm-cov", "--ignore-filename-regex", "(main|service/testing)\\.rs", "--html"]
+cov = ["llvm-cov", "--ignore-filename-regex", "(main|service/testing|/tests)\\.rs"]
+cov-html = ["llvm-cov", "--ignore-filename-regex", "(main|service/testing|/tests)\\.rs", "--html"]

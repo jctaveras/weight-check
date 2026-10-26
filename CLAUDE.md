@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-weight-check is a benchmark tool for local LLMs served by llama.cpp. The monorepo currently has only the Rust backend (`backend/`). There is no frontend yet, so don't add one unless asked.
+weight-check is a benchmark tool for local LLMs served by llama.cpp. The monorepo has a Rust backend (`backend/`) and a Next.js frontend (`frontend/`). See the Frontend section below.
 
 ## Commands
 
@@ -104,3 +104,29 @@ Other test setups:
 - Configuration comes from `.env` at the repo root (see `.env.example`).
   - Keys: `DATABASE_URL`, `BIND_ADDR`, `LLAMA_SERVER_BIN`, `MODELS_DIR`, `IDLE_TIMEOUT_SECS` (0 disables the watchdog) and `LLAMA_LOAD_TIMEOUT_SECS`.
 - The developer's machine often runs its own llama-server on port 8080, holding most of the 24 GB VRAM on the RX 7900 XTX (Vulkan build). Don't kill those processes. When testing, use a small model with partial offload (`n_gpu_layers`), or ask first.
+
+## Frontend (`frontend/`)
+
+Next.js 16 App Router, TypeScript, Tailwind CSS v4, TanStack Query, Vitest + Testing Library. **Use pnpm, not npm.** Run commands from `frontend/`:
+
+```sh
+pnpm dev                                      # http://localhost:3000; needs the backend on :8787
+pnpm lint && pnpm typecheck && pnpm test && pnpm build
+```
+
+- This Next.js version differs from older ones. Read `frontend/AGENTS.md` and the bundled docs in `node_modules/next/dist/docs/` before using unfamiliar APIs.
+- `cacheComponents` and `partialPrefetching` are on. Any client component that calls `usePathname`, `useSearchParams` or `useParams` under a dynamic route must sit inside a `<Suspense>` boundary, or the build fails. Hidden routes stay mounted through React `<Activity>`, so form and mutation state survives navigation; reset it explicitly when needed.
+- The browser calls the backend directly at `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8787`), not through Next rewrites, because a model load can outlast the dev proxy timeout.
+- Layers mirror the backend:
+  - `lib/api/` holds the fetch client, one function per endpoint and the TS mirrors of the Rust types. Update `types.ts` when backend DTOs change.
+  - `lib/queries/` holds the TanStack hooks.
+  - `components/ui/` holds the primitives, and `components/<feature>/` the feature components.
+  - Pages in `app/` only compose components.
+- Every query hook is wrapped in `useHydratedQuery` (`lib/queries/hydration.ts`), so the first client render matches the server's loading state. Do the same for new query hooks.
+- Put form and parsing logic in pure modules (e.g. `components/models/loadForm.ts`, `components/benchmarks/configJson.ts`) and unit-test them.
+- Tests are `*.test.ts(x)` files next to their source. `src/test/render.tsx` provides `renderWithQuery`, `mockFetch` and `jsonResponse`.
+- Follow the Vercel Web Interface Guidelines (`/web-design-guidelines`):
+  - labelled inputs, visible `:focus-visible` rings
+  - `…` in loading text, `tabular-nums` for numbers, `Intl` formatting
+  - Title Case for headings and buttons, error messages that give a next step
+  - no browser `confirm()` dialogs

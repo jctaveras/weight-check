@@ -25,7 +25,7 @@ cargo cov --summary-only                     # coverage via cargo-llvm-cov (alia
 cargo cov-html                               # HTML report in target/llvm-cov/html
 ```
 
-- The Tauri CLI comes from `ui/`'s devDependencies (`@tauri-apps/cli`). Tauri runs `beforeDevCommand`/`beforeBuildCommand` (`pnpm dev`/`pnpm build`) with `ui/` as the working directory. From `ui/` the CLI only finds `src-tauri/` through `TAURI_APP_PATH=../src-tauri` (the `tauri` script in `ui/package.json` must set it); from the repo root it is found automatically (`ui/node_modules/.bin/tauri dev`).
+- The Tauri CLI comes from `ui/`'s devDependencies (`@tauri-apps/cli`). Tauri runs `beforeDevCommand`/`beforeBuildCommand` (`pnpm dev`/`pnpm build`) with `ui/` as the working directory. From `ui/` the CLI only finds `src-tauri/` through `TAURI_APP_PATH=../src-tauri` (the `tauri` script in `ui/package.json` sets it via `cross-env`); from the repo root it is found automatically (`ui/node_modules/.bin/tauri dev`).
 - Coverage aliases cover the whole workspace and exclude `src-tauri/src/main.rs`, `service/testing.rs` and unit test files (`**/tests.rs`). `repository/sqlite.rs` is covered by the integration tests.
 - The SQLite integration test (`core/tests/sqlite.rs`) always runs: each test opens a fresh database file in a `tempfile` dir via `SqliteStore::connect`/`open`, which apply the migrations.
 - The database is an embedded SQLite file, `weight-check.db` in the OS app data directory (`app.path().app_data_dir()`, e.g. `~/.local/share/dev.weightcheck.app/` on Linux), created if missing and opened with foreign keys on and WAL journaling.

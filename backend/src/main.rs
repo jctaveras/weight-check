@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
 
 use weight_check::config::Config;
@@ -10,7 +9,7 @@ use weight_check::infra::monitor::amdgpu::AmdGpuMonitor;
 use weight_check::infra::monitor::host::SysinfoHostMonitor;
 use weight_check::infra::monitor::{GpuMonitor, HostMonitor};
 use weight_check::presentation::{self, AppState};
-use weight_check::repository::postgres::PgStore;
+use weight_check::repository::sqlite::SqliteStore;
 use weight_check::service::benchmark_service::BenchmarkService;
 use weight_check::service::benchmarks::Registry;
 use weight_check::service::model_service::ModelService;
@@ -28,12 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::from_env()?;
 
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .connect(&config.database_url)
-        .await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
-    let store = Arc::new(PgStore::new(pool));
+    let store = Arc::new(SqliteStore::connect(&config.database_url).await?);
+    tracing::info!(url = %config.database_url, "database ready");
 
     let gpu: Option<Arc<dyn GpuMonitor>> = AmdGpuMonitor::discover(Path::new("/sys/class/drm"))
         .map(|g| Arc::new(g) as Arc<dyn GpuMonitor>);

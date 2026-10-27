@@ -1,6 +1,6 @@
 //! Data-storage layer. Services depend only on these traits.
 
-pub mod postgres;
+pub mod sqlite;
 
 use async_trait::async_trait;
 use serde_json::Value;

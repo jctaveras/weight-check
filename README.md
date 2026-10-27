@@ -2,7 +2,7 @@
 
 A friendly benchmark tool for local LLMs served by [llama.cpp](https://github.com/ggml-org/llama.cpp).
 
-The Rust backend lives in [`backend/`](backend/). It manages `llama-server` as a child process, runs benchmarks against the loaded model, samples hardware telemetry, and stores results in PostgreSQL.
+The Rust backend lives in [`backend/`](backend/). It manages `llama-server` as a child process, runs benchmarks against the loaded model, samples hardware telemetry, and stores results in an embedded SQLite database.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ presentation  (axum)       HTTP routing, payload parsing, error → status mappi
      │
 service                    Model lifecycle (load / unload / idle timeout), benchmark registry and
      │                     orchestration, system info. Uses infra adapters for llama-server & sensors.
-repository  (sqlx)         Traits + PostgreSQL implementation. Stores models, hardware, runs, metrics.
+repository  (sqlx)         Traits + SQLite implementation. Stores models, hardware, runs, metrics.
 ```
 
 - `src/infra/` holds the adapters the services use: the `llama-server` launcher and HTTP client, the GGUF metadata reader, and the GPU/host monitors.
@@ -27,7 +27,7 @@ The schema is a hybrid; see `backend/migrations/`:
 |---|---|
 | `models` | GGUF files found in `MODELS_DIR`, plus metadata read from the GGUF header (architecture, quantization, layer count) |
 | `hardware_profiles` | CPU, GPU, VRAM, RAM and ggml backend, detected at startup |
-| `benchmark_runs` | One row per run: category, benchmark, status, and `config` / `details` stored as JSONB for flexible, benchmark-specific data |
+| `benchmark_runs` | One row per run: category, benchmark, status, and `config` / `details` stored as JSON text for flexible, benchmark-specific data |
 | `metrics` | Narrow `(run_id, name, value, unit)` rows holding each run's headline numbers, so results can be compared across runs and categories with plain SQL |
 
 ## Benchmarks
@@ -46,15 +46,14 @@ GPU telemetry currently supports AMD GPUs through amdgpu sysfs (VRAM, busy %, po
 
 ## Running locally
 
-Requirements: Rust (stable), Podman or Docker, and a built `llama-server`.
+Requirements: Rust (stable) and a built `llama-server`. No database server is needed.
 
 ```sh
 cp .env.example .env          # then edit LLAMA_SERVER_BIN and MODELS_DIR
-podman-compose up -d          # or: docker compose up -d
 cd backend && cargo run       # listens on 127.0.0.1:8787 by default
 ```
 
-Migrations run automatically on startup.
+The SQLite file (`weight-check.db` by default) is created on first start, and migrations run automatically.
 
 ### Frontend
 
@@ -100,7 +99,7 @@ Only one benchmark runs at a time. While a run is active, the model cannot be un
 
 | Variable | Default | |
 |---|---|---|
-| `DATABASE_URL` | — | required |
+| `DATABASE_URL` | `sqlite://weight-check.db` | relative paths resolve against the working directory; the file is created if missing |
 | `BIND_ADDR` | `127.0.0.1:8787` | |
 | `LLAMA_SERVER_BIN` | `llama-server` | path or name on `PATH` |
 | `MODELS_DIR` | `./models` | scanned non-recursively; `mmproj` files are skipped |
@@ -111,8 +110,7 @@ Only one benchmark runs at a time. While a run is active, the model cannot be un
 
 ```sh
 cd backend
-cargo test                                                     # unit tests
-TEST_DATABASE_URL=postgres://weight:weight@localhost:5432/weight_check_test cargo test   # + Postgres integration
+cargo test                                                     # unit + SQLite integration tests (temp DB files)
 
 cd frontend
 pnpm test                                                      # Vitest component and unit tests

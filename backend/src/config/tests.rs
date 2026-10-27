@@ -12,8 +12,8 @@ fn config(vars: &[(&str, &str)]) -> Result<Config, String> {
 
 #[test]
 fn applies_defaults() {
-    let c = config(&[("DATABASE_URL", "postgres://x")]).unwrap();
-    assert_eq!(c.database_url, "postgres://x");
+    let c = config(&[]).unwrap();
+    assert_eq!(c.database_url, "sqlite://weight-check.db");
     assert_eq!(c.bind_addr.to_string(), "127.0.0.1:8787");
     assert_eq!(c.llama_server_bin, PathBuf::from("llama-server"));
     assert_eq!(c.models_dir, PathBuf::from("./models"));
@@ -24,7 +24,7 @@ fn applies_defaults() {
 #[test]
 fn reads_overrides_and_zero_disables_watchdog() {
     let c = config(&[
-        ("DATABASE_URL", "postgres://x"),
+        ("DATABASE_URL", "sqlite://x.db"),
         ("BIND_ADDR", "0.0.0.0:9000"),
         ("LLAMA_SERVER_BIN", "/opt/llama-server"),
         ("MODELS_DIR", "/models"),
@@ -32,6 +32,7 @@ fn reads_overrides_and_zero_disables_watchdog() {
         ("LLAMA_LOAD_TIMEOUT_SECS", "5"),
     ])
     .unwrap();
+    assert_eq!(c.database_url, "sqlite://x.db");
     assert_eq!(c.bind_addr.port(), 9000);
     assert_eq!(c.llama_server_bin, PathBuf::from("/opt/llama-server"));
     assert_eq!(c.models_dir, PathBuf::from("/models"));
@@ -40,10 +41,9 @@ fn reads_overrides_and_zero_disables_watchdog() {
 }
 
 #[test]
-fn reports_missing_and_invalid_values() {
-    assert!(config(&[]).unwrap_err().contains("DATABASE_URL"));
-    let bad_addr = config(&[("DATABASE_URL", "x"), ("BIND_ADDR", "nope")]);
+fn reports_invalid_values() {
+    let bad_addr = config(&[("BIND_ADDR", "nope")]);
     assert!(bad_addr.unwrap_err().contains("BIND_ADDR"));
-    let bad_num = config(&[("DATABASE_URL", "x"), ("IDLE_TIMEOUT_SECS", "-1")]);
+    let bad_num = config(&[("IDLE_TIMEOUT_SECS", "-1")]);
     assert!(bad_num.unwrap_err().contains("IDLE_TIMEOUT_SECS"));
 }

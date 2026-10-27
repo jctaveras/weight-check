@@ -22,7 +22,7 @@ impl Config {
     /// Builds the config from any key lookup, so tests need not touch the process env.
     fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
         let env_or = |key: &str, default: &str| get(key).unwrap_or_else(|| default.to_string());
-        let database_url = get("DATABASE_URL").ok_or("DATABASE_URL must be set")?;
+        let database_url = env_or("DATABASE_URL", "sqlite://weight-check.db");
         let bind_addr = env_or("BIND_ADDR", "127.0.0.1:8787")
             .parse()
             .map_err(|e| format!("invalid BIND_ADDR: {e}"))?;

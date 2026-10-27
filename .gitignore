@@ -1,2 +1,7 @@
 /backend/target
 .env
+
+# Local SQLite databases
+*.db
+*.db-wal
+*.db-shm

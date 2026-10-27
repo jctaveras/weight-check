@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { clearMocks } from "@tauri-apps/api/mocks";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
@@ -7,6 +8,7 @@ window.scrollTo = () => {};
 
 afterEach(() => {
   cleanup();
+  clearMocks();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });

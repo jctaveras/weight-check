@@ -17,7 +17,7 @@ export function describeError(error: unknown): ErrorDescription {
     case "network":
       return {
         message: error.message,
-        hint: "Start it with `cargo run` in backend/ and check VITE_API_URL.",
+        hint: "Run `pnpm tauri dev` in ui/ to start the desktop app; a plain browser tab can't reach the core.",
       };
     case "no_model_loaded":
       return {
@@ -32,11 +32,11 @@ export function describeError(error: unknown): ErrorDescription {
     case "llama_server":
       return {
         message: error.message,
-        hint: "Check the backend logs; try fewer GPU layers or a smaller context size.",
+        hint: "Check the app logs; try fewer GPU layers or a smaller context size.",
       };
     case "validation":
       return { message: error.message, hint: "Fix the highlighted input and submit again." };
     default:
-      return { message: error.message, hint: "Check the backend logs for details." };
+      return { message: error.message, hint: "Check the app logs for details." };
   }
 }

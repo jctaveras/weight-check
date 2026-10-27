@@ -4,7 +4,7 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 
 import type { ModelInfo } from "@/lib/api/types";
-import { jsonResponse, mockFetch, renderWithQuery } from "@/test/render";
+import { mockInvoke, renderWithQuery } from "@/test/render";
 import { LoadModelForm } from "./LoadModelForm";
 import { parseLoadForm } from "./loadForm";
 
@@ -57,31 +57,32 @@ function Harness({ hasLoadedModel = false }: { hasLoadedModel?: boolean }) {
 
 describe("LoadModelForm", () => {
   it("sends only the numeric fields that were filled in", async () => {
-    const fetch = mockFetch(() =>
-      jsonResponse({ model, settings: { ctx_size: 2048, n_gpu_layers: 8, parallel: 1, threads: null } }),
-    );
+    const invoke = mockInvoke({
+      load_model: () => ({ model, settings: { ctx_size: 2048, n_gpu_layers: 8, parallel: 1, threads: null } }),
+    });
     renderWithQuery(<Harness />);
     await userEvent.selectOptions(screen.getByLabelText("Model"), model.id);
     await userEvent.type(screen.getByLabelText("Context Size"), "2048");
     await userEvent.type(screen.getByLabelText("GPU Layers"), "8");
     await userEvent.click(screen.getByRole("button", { name: "Load Model" }));
 
-    await waitFor(() => expect(fetch).toHaveBeenCalled());
-    const [url, init] = fetch.mock.calls[0];
-    expect(url).toMatch(/\/models\/load$/);
-    expect(JSON.parse(String(init?.body))).toEqual({ model_id: model.id, ctx_size: 2048, n_gpu_layers: 8 });
+    await waitFor(() => expect(invoke).toHaveBeenCalled());
+    expect(invoke.mock.calls[0]).toEqual([
+      "load_model",
+      { request: { model_id: model.id, ctx_size: 2048, n_gpu_layers: 8 } },
+    ]);
     expect(await screen.findByText("Loaded tiny-q4.")).toBeInTheDocument();
   });
 
   it("shows inline errors and focuses the first invalid field", async () => {
-    const fetch = mockFetch(() => jsonResponse({}));
+    const invoke = mockInvoke({ load_model: () => ({}) });
     renderWithQuery(<Harness />);
     await userEvent.type(screen.getByLabelText("Parallel Slots"), "0");
     await userEvent.click(screen.getByRole("button", { name: "Load Model" }));
     expect(screen.getByText("Choose a model to load.")).toBeInTheDocument();
     expect(screen.getByText("Must be at least 1.")).toBeInTheDocument();
     expect(screen.getByLabelText("Model")).toHaveFocus();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("labels the action as a swap when a model is loaded", () => {

@@ -6,7 +6,7 @@ import { queryKeys } from "./keys";
 export function useCatalog() {
   return useQuery({
     queryKey: queryKeys.catalog,
-    queryFn: ({ signal }) => getCatalog(signal),
+    queryFn: () => getCatalog(),
     staleTime: Infinity,
   });
 }

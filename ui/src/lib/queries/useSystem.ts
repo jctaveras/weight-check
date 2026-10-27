@@ -6,7 +6,7 @@ import { queryKeys } from "./keys";
 export function useSystem() {
   return useQuery({
     queryKey: queryKeys.system,
-    queryFn: ({ signal }) => getSystem(signal),
+    queryFn: () => getSystem(),
     refetchInterval: 2000,
   });
 }

@@ -9,7 +9,7 @@ export const isActive = (status: RunStatus) => status === "queued" || status ===
 export function useRuns(filter: RunFilter = {}) {
   return useQuery({
     queryKey: queryKeys.runs(filter),
-    queryFn: ({ signal }) => listRuns(filter, signal),
+    queryFn: () => listRuns(filter),
     refetchInterval: (query) =>
       query.state.data?.some((run) => isActive(run.status)) ? 3000 : false,
   });

@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 
-import { ApiError } from "@/lib/api/client";
+import { ApiError, type ApiErrorCode } from "@/lib/api/client";
+
+const RETRYABLE = new Set<ApiErrorCode>(["internal", "llama_server", "unknown"]);
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -8,9 +10,9 @@ export function makeQueryClient() {
       queries: {
         staleTime: 1000,
         refetchOnWindowFocus: true,
-        // Don't hammer the backend on 4xx; retry transient failures once.
+        // Retry possibly transient core failures once; client-side errors won't change on retry.
         retry: (count, error) =>
-          !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 1,
+          count < 1 && (!(error instanceof ApiError) || RETRYABLE.has(error.code)),
       },
     },
   });

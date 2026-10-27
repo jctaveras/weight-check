@@ -16,7 +16,16 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
+  // Tauri dev: keep the Rust build output visible, and fail rather than move off the port the
+  // desktop shell's devUrl expects.
+  clearScreen: false,
   server: { port: 5173, strictPort: true },
+  envPrefix: ["VITE_", "TAURI_ENV_*"],
+  build: {
+    // WebKitGTK/WKWebView (Linux, macOS) lag behind Chromium-based WebView2 (Windows).
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari15",
+    sourcemap: Boolean(process.env.TAURI_ENV_DEBUG),
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],

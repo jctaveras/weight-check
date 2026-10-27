@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-weight-check is a benchmark tool for local LLMs served by llama.cpp. The monorepo has a Rust backend (`backend/`) and a Next.js frontend (`frontend/`). See the Frontend section below.
+weight-check is a benchmark tool for local LLMs served by llama.cpp. The monorepo has a Rust backend (`backend/`) and a Vite + React UI (`ui/`). See the Frontend section below.
 
 ## Commands
 
@@ -105,26 +105,29 @@ Other test setups:
   - Keys: `DATABASE_URL`, `BIND_ADDR`, `LLAMA_SERVER_BIN`, `MODELS_DIR`, `IDLE_TIMEOUT_SECS` (0 disables the watchdog) and `LLAMA_LOAD_TIMEOUT_SECS`.
 - The developer's machine often runs its own llama-server on port 8080, holding most of the 24 GB VRAM on the RX 7900 XTX (Vulkan build). Don't kill those processes. When testing, use a small model with partial offload (`n_gpu_layers`), or ask first.
 
-## Frontend (`frontend/`)
+## Frontend (`ui/`)
 
-Next.js 16 App Router, TypeScript, Tailwind CSS v4, TanStack Query, Vitest + Testing Library. **Use pnpm, not npm.** Run commands from `frontend/`:
+Vite + React 19 single-page app, TypeScript, TanStack Router (file-based), TanStack Query, Tailwind CSS v4 (`@tailwindcss/vite`), Vitest + Testing Library. It builds to a static bundle in `ui/dist/` (the Tauri desktop shell will serve it). **Use pnpm, not npm.** Run commands from `ui/`:
 
 ```sh
-pnpm dev                                      # http://localhost:3000; needs the backend on :8787
+pnpm dev                                      # http://localhost:5173 (strictPort); needs the backend on :8787
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
 
-- This Next.js version differs from older ones. Read `frontend/AGENTS.md` and the bundled docs in `node_modules/next/dist/docs/` before using unfamiliar APIs.
-- `cacheComponents` and `partialPrefetching` are on. Any client component that calls `usePathname`, `useSearchParams` or `useParams` under a dynamic route must sit inside a `<Suspense>` boundary, or the build fails. Hidden routes stay mounted through React `<Activity>`, so form and mutation state survives navigation; reset it explicitly when needed.
-- The browser calls the backend directly at `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8787`), not through Next rewrites, because a model load can outlast the dev proxy timeout.
+- Routes live in `src/routes/` (`__root.tsx`, `index.tsx`, `models.tsx`, `benchmarks.tsx`, `runs/index.tsx`, `runs/$id.tsx`). The router plugin in `vite.config.ts` regenerates `src/routeTree.gen.ts` on `dev`/`build`; it is committed so `tsc` works on a clean checkout. Commit it whenever routes change.
+  - Page titles come from each route's `staticData.title` (`components/layout/DocumentTitle.tsx`).
+  - `/runs` filters live in the URL: `validateSearch` is `validateRunSearch` from `components/runs/runFilterParams.ts`; read with `Route.useSearch()`, update with `useNavigate({ from: "/runs/" })`.
+  - Use `Link`/`useNavigate` from `@tanstack/react-router` with typed `to`/`params`/`search`, never raw URL strings.
+- Routes unmount when you navigate away, so form and mutation state resets on its own; in-flight mutations still finish and invalidate their queries.
+- The browser calls the backend directly at `VITE_API_URL` (default `http://127.0.0.1:8787`, typed in `src/vite-env.d.ts`). A later phase swaps fetch for Tauri `invoke`, so keep `lib/api/*` function signatures stable.
 - Layers mirror the backend:
   - `lib/api/` holds the fetch client, one function per endpoint and the TS mirrors of the Rust types. Update `types.ts` when backend DTOs change.
-  - `lib/queries/` holds the TanStack hooks.
+  - `lib/queries/` holds the TanStack Query hooks (plain `useQuery`/`useMutation`).
   - `components/ui/` holds the primitives, and `components/<feature>/` the feature components.
-  - Pages in `app/` only compose components.
-- Every query hook is wrapped in `useHydratedQuery` (`lib/queries/hydration.ts`), so the first client render matches the server's loading state. Do the same for new query hooks.
+  - Route files in `src/routes/` only compose components.
+- Component files export only components (react-refresh lint rule); put shared helpers in a `.ts` module (e.g. `components/ui/buttonClasses.ts`).
 - Put form and parsing logic in pure modules (e.g. `components/models/loadForm.ts`, `components/benchmarks/configJson.ts`) and unit-test them.
-- Tests are `*.test.ts(x)` files next to their source. `src/test/render.tsx` provides `renderWithQuery`, `mockFetch` and `jsonResponse`.
+- Tests are `*.test.ts(x)` files next to their source. `src/test/render.tsx` provides `renderWithQuery`, `renderWithRouter` (async; memory router, for components using `Link`/`useNavigate`, returns `router` to assert on `router.state.location`), `mockFetch` and `jsonResponse`.
 - Follow the Vercel Web Interface Guidelines (`/web-design-guidelines`):
   - labelled inputs, visible `:focus-visible` rings
   - `…` in loading text, `tabular-nums` for numbers, `Intl` formatting

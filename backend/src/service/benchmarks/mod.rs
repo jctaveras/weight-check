@@ -32,7 +32,7 @@ pub struct BenchmarkDescriptor {
 pub struct BenchmarkOutcome {
     /// Headline numbers, stored in the `metrics` table for cross-run comparison.
     pub metrics: Vec<Metric>,
-    /// Raw, benchmark-specific output, stored as JSONB.
+    /// Raw, benchmark-specific output, stored as JSON.
     pub details: Value,
 }
 

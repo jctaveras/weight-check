@@ -11,20 +11,20 @@ weight-check is a benchmark tool for local LLMs served by llama.cpp. The monorep
 Run all cargo commands from `backend/`. Cargo is installed via rustup in `~/.cargo/bin`, which may not be on PATH in a fresh shell.
 
 ```sh
-podman-compose up -d                         # Postgres 17 (repo root; docker compose also works)
 cargo run                                    # reads ../.env via dotenvy; listens on 127.0.0.1:8787
-cargo test                                   # unit tests (no DB needed)
+cargo test                                   # unit tests + SQLite integration tests
 cargo test idle_watchdog                     # single test by name filter
-TEST_DATABASE_URL=postgres://weight:weight@localhost:5432/weight_check_test cargo test --test postgres
+cargo test --test sqlite                     # repository integration tests only
 cargo fmt && cargo clippy --all-targets -- -D warnings
 cargo cov --summary-only                     # coverage via cargo-llvm-cov (alias in .cargo/config.toml)
 cargo cov-html                               # HTML report in target/llvm-cov/html
 ```
 
-- Coverage aliases exclude `main.rs`, `service/testing.rs` and unit test files (`**/tests.rs`). Set `TEST_DATABASE_URL` so that `repository/postgres.rs` is covered too.
+- Coverage aliases exclude `main.rs`, `service/testing.rs` and unit test files (`**/tests.rs`). `repository/sqlite.rs` is covered by the integration tests.
 
-- The Postgres integration test (`tests/postgres.rs`) silently skips unless `TEST_DATABASE_URL` is set. It runs migrations against that database.
-- Migrations in `backend/migrations/` are applied automatically at startup via `sqlx::migrate!`. Schema changes go in new numbered files; don't edit `0001_init.sql`.
+- The SQLite integration test (`tests/sqlite.rs`) always runs: each test opens a fresh database file in a `tempfile` dir via `SqliteStore::connect`, which applies the migrations.
+- The database is an embedded SQLite file (`DATABASE_URL`, default `sqlite://weight-check.db`), created if missing, opened with foreign keys on and WAL journaling.
+- Migrations in `backend/migrations/` are applied automatically at startup via `sqlx::migrate!` (inside `SqliteStore::connect`). Schema changes go in new numbered files; don't edit `0001_init.sql`.
 
 ## Architecture
 
@@ -36,15 +36,15 @@ The backend uses a strict layered architecture. Respect the boundaries:
   - The `ApiJson` and `ApiQuery` extractors turn malformed payloads into `AppError::Validation`.
   - `AppError` → HTTP status mapping is in `presentation/error.rs`.
 - **`service/`** holds all logic and depends only on repository **traits** and infra traits, never on sqlx or reqwest types directly.
-- **`repository/`** contains the traits (`mod.rs`) and `PgStore` (`postgres.rs`), which implements all of them.
+- **`repository/`** contains the traits (`mod.rs`) and `SqliteStore` (`sqlite.rs`), which implements all of them.
   - Queries are runtime-checked (`query_as`), not `query!` macros, so builds don't need a live DB.
-  - Postgres enums (`benchmark_category`, `run_status`) are bound as text with `::benchmark_category` casts and read back with `::text`. The `domain` types stay free of sqlx.
+  - SQLite has no enum, UUID, timestamp or JSON types. Category and status are TEXT columns guarded by `CHECK (... IN (...))`; UUIDs are bound and read as hyphenated TEXT (`uuid::fmt::Hyphenated`); timestamps are bound from Rust (`Utc::now()`, never SQL `now()`) as RFC 3339 TEXT; JSON goes through `sqlx::types::Json`. Placeholders are `?N`. The `domain` types stay free of sqlx.
 - **`infra/`** holds the adapters the services use:
   - `llama/`: the `ServerLauncher`, `RunningServer` and `LlamaApi` traits, plus the real llama-server process and HTTP client.
   - `monitor/`: `GpuMonitor` (AMD via amdgpu sysfs; this is where NVML would be added) and `HostMonitor` (sysinfo).
   - `gguf.rs`: header metadata reader.
 - **`domain/`** contains plain shared types. **`error.rs`** contains the single `AppError` used by every layer.
-- **Wiring** happens in `main.rs`: config → pool → `PgStore` → monitors → services → router. `lib.rs` exposes the modules for integration tests.
+- **Wiring** happens in `main.rs`: config → `SqliteStore::connect` (pool + migrations) → monitors → services → router. `lib.rs` exposes the modules for integration tests.
 
 ### Model lifecycle (`service/model_service.rs`)
 
@@ -75,7 +75,7 @@ The backend uses a strict layered architecture. Respect the boundaries:
 
 The schema is a hybrid:
 - **Relational tables:** `models`, `hardware_profiles` and `benchmark_runs`.
-- **JSONB columns on runs:**
+- **JSON (TEXT, `json_valid`-checked) columns on runs:**
   - `config` holds `{benchmark: resolved config, server: LoadSettings}`.
   - `details` holds raw, benchmark-specific output such as samples and per-request timings.
 - **The narrow `metrics` table:** `(run_id, name, value, unit)`, written in the same transaction that completes the run.

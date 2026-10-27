@@ -1,0 +1,29 @@
+[package]
+name = "weight-check"
+version.workspace = true
+edition.workspace = true
+description = "Friendly benchmark tool for local LLMs served by llama.cpp"
+
+[lib]
+name = "weight_check_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12", features = [] }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+weight-check-core.workspace = true
+
+[dev-dependencies]
+# Mock runtime for driving commands through the real IPC handler.
+tauri = { version = "2.12", features = ["test"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+weight-check-core = { workspace = true, features = ["testing"] }

@@ -1,0 +1,5 @@
+# Coverage via cargo-llvm-cov over the whole workspace. Excludes the app binary's entry point,
+# the test fakes and unit test files.
+[alias]
+cov = ["llvm-cov", "--workspace", "--ignore-filename-regex", "(src-tauri/src/main|service/testing|/tests)\\.rs"]
+cov-html = ["llvm-cov", "--workspace", "--ignore-filename-regex", "(src-tauri/src/main|service/testing|/tests)\\.rs", "--html"]

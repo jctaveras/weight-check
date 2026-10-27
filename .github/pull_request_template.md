@@ -5,8 +5,8 @@
 ### ⚠️ Behaviour change
 
 <!-- Delete this section if nothing externally observable changes.
-Otherwise state before → after (new value in bold) for: HTTP status codes, response shapes, endpoints, .env keys, metric names/units, or the database schema.
-List every new migration (backend/migrations/NNNN_*.sql) and what it changes; migrations run automatically at startup. -->
+Otherwise state before → after (new value in bold) for: command names/arguments, error codes, response shapes, env keys, metric names/units, or the database schema.
+List every new migration (core/migrations/NNNN_*.sql) and what it changes; migrations run automatically at startup. -->
 
 ## Changes
 
@@ -17,7 +17,7 @@ Most important group first; docs and housekeeping last. -->
 
 <!-- [x] only for what you actually ran, with the result. Leave anything not run as [ ] and say why. -->
 
-- [ ] `cargo fmt --check`
-- [ ] `cargo clippy --all-targets -- -D warnings`
-- [ ] `cargo test`
-- [ ] Postgres integration test (`TEST_DATABASE_URL=… cargo test --test postgres`)
+- [ ] `cargo fmt --all --check`
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
+- [ ] `cargo test --workspace`
+- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` (in `ui/`)

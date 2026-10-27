@@ -1,57 +1,73 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { jsonResponse, mockFetch } from "@/test/render";
-import { API_URL, ApiError, apiFetch, buildUrl } from "./client";
+import { mockInvoke } from "@/test/render";
+import { ApiError, call } from "./client";
+import { compactFilter, listRuns } from "./runs";
 
-describe("buildUrl", () => {
-  it("drops empty and undefined query values", () => {
-    const url = new URL(buildUrl("/runs", { limit: 5, category: undefined, benchmark: "" }));
-    expect(url.pathname).toBe("/runs");
-    expect([...url.searchParams]).toEqual([["limit", "5"]]);
-  });
-});
-
-describe("apiFetch", () => {
-  it("returns parsed JSON on success", async () => {
-    mockFetch(() => jsonResponse({ status: "ok" }));
-    await expect(apiFetch("/health")).resolves.toEqual({ status: "ok" });
+describe("call", () => {
+  it("resolves with the command's result", async () => {
+    const invoke = mockInvoke({ health: () => ({ status: "ok" }) });
+    await expect(call("health")).resolves.toEqual({ status: "ok" });
+    expect(invoke).toHaveBeenCalledWith("health", {});
   });
 
-  it("sends JSON bodies with a content type", async () => {
-    const fetch = mockFetch(() => jsonResponse({}, 202));
-    await apiFetch("/runs", { method: "POST", body: { benchmark_id: "x" } });
-    const [url, init] = fetch.mock.calls[0];
-    expect(url).toBe(`${API_URL}/runs`);
-    expect(init?.method).toBe("POST");
-    expect(init?.headers).toEqual({ "Content-Type": "application/json" });
-    expect(init?.body).toBe('{"benchmark_id":"x"}');
+  it("passes args through to the command", async () => {
+    const invoke = mockInvoke({ start_run: () => ({ id: "run-1" }) });
+    await call("start_run", { request: { benchmark_id: "x" } });
+    expect(invoke.mock.calls[0]).toEqual(["start_run", { request: { benchmark_id: "x" } }]);
   });
 
-  it("returns undefined for 204", async () => {
-    mockFetch(() => new Response(null, { status: 204 }));
-    await expect(apiFetch("/models/unload", { method: "POST" })).resolves.toBeUndefined();
-  });
-
-  it("maps the error envelope to ApiError", async () => {
-    mockFetch(() =>
-      jsonResponse({ error: { code: "no_model_loaded", message: "no model is loaded" } }, 409),
-    );
-    const err = await apiFetch("/runs").catch((e: unknown) => e);
+  it("maps a { code, message } rejection to ApiError", async () => {
+    mockInvoke({
+      list_runs: () => {
+        throw { code: "no_model_loaded", message: "no model is loaded" };
+      },
+    });
+    const err = await call("list_runs").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect(err).toMatchObject({ status: 409, code: "no_model_loaded", message: "no model is loaded" });
+    expect(err).toMatchObject({ code: "no_model_loaded", message: "no model is loaded" });
   });
 
-  it("falls back to the raw text for non-JSON errors", async () => {
-    mockFetch(() => new Response("Bad Gateway", { status: 502 }));
-    await expect(apiFetch("/system")).rejects.toMatchObject({
-      status: 502,
+  it("maps an unrecognized code to unknown", async () => {
+    mockInvoke({
+      system_snapshot: () => Promise.reject({ code: "teapot", message: "short and stout" }),
+    });
+    await expect(call("system_snapshot")).rejects.toMatchObject({
       code: "unknown",
-      message: "Bad Gateway",
+      message: "short and stout",
     });
   });
 
-  it("reports network failures as a network ApiError", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
-    await expect(apiFetch("/system")).rejects.toMatchObject({ status: 0, code: "network" });
+  it("maps a string rejection (argument deserialization) to a validation ApiError", async () => {
+    mockInvoke({
+      get_run: () => Promise.reject("invalid args `id` for command `get_run`"),
+    });
+    await expect(call("get_run", { id: 1 })).rejects.toMatchObject({
+      code: "validation",
+      message: "invalid args `id` for command `get_run`",
+    });
+  });
+
+  it("maps any other rejection to an unknown ApiError", async () => {
+    mockInvoke({ model_status: () => Promise.reject(42) });
+    const err = await call("model_status").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ code: "unknown" });
+  });
+
+  it("reports a network ApiError outside the desktop app", async () => {
+    await expect(call("health")).rejects.toMatchObject({
+      code: "network",
+      message: expect.stringContaining("pnpm tauri dev"),
+    });
+  });
+});
+
+describe("listRuns", () => {
+  it("drops empty and undefined filter values", async () => {
+    expect(compactFilter({ limit: 5, category: undefined, benchmark: "" })).toEqual({ limit: 5 });
+    const invoke = mockInvoke({ list_runs: () => [] });
+    await listRuns({ limit: 5, benchmark: "" });
+    expect(invoke.mock.calls[0]).toEqual(["list_runs", { filter: { limit: 5 } }]);
   });
 });

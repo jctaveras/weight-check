@@ -1,12 +1,12 @@
-import { apiFetch } from "./client";
+import { call } from "./client";
 import type { ActiveModel, LoadModelRequest, ModelInfo, ModelStatus } from "./types";
 
-export const listModels = (signal?: AbortSignal) => apiFetch<ModelInfo[]>("/models", { signal });
+export const listModels = () => call<ModelInfo[]>("list_models");
 
-export const getModelStatus = (signal?: AbortSignal) =>
-  apiFetch<ModelStatus>("/models/status", { signal });
+export const getModelStatus = () => call<ModelStatus>("model_status");
 
-export const loadModel = (body: LoadModelRequest) =>
-  apiFetch<ActiveModel>("/models/load", { method: "POST", body });
+export const loadModel = (request: LoadModelRequest) => call<ActiveModel>("load_model", { request });
 
-export const unloadModel = () => apiFetch<void>("/models/unload", { method: "POST" });
+export const unloadModel = async (): Promise<void> => {
+  await call<null>("unload_model");
+};

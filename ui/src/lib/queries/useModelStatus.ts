@@ -6,7 +6,7 @@ import { queryKeys } from "./keys";
 export function useModelStatus() {
   return useQuery({
     queryKey: queryKeys.modelStatus,
-    queryFn: ({ signal }) => getModelStatus(signal),
+    queryFn: () => getModelStatus(),
     refetchInterval: 2000,
   });
 }

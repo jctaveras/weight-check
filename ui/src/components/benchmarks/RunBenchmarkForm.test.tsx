@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { BenchmarkDescriptor } from "@/lib/api/types";
-import { jsonResponse, mockFetch, renderWithRouter } from "@/test/render";
+import { mockInvoke, renderWithRouter } from "@/test/render";
 import { BenchmarkCard } from "./BenchmarkCard";
 import { RunBenchmarkForm } from "./RunBenchmarkForm";
 
@@ -25,14 +25,14 @@ describe("RunBenchmarkForm", () => {
   });
 
   it("blocks submit on invalid JSON and focuses the editor", async () => {
-    const fetch = mockFetch(() => jsonResponse({}));
+    const invoke = mockInvoke({ start_run: () => ({}) });
     await renderWithRouter(<RunBenchmarkForm benchmark={benchmark} />);
     fireEvent.change(textarea(), { target: { value: "{ nope" } });
     await userEvent.click(screen.getByRole("button", { name: "Start Run" }));
     expect(screen.getByText(/Invalid JSON/)).toBeInTheDocument();
     expect(textarea()).toHaveFocus();
     expect(textarea()).toHaveAttribute("aria-invalid", "true");
-    expect(fetch).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("rejects non-object JSON", async () => {
@@ -52,19 +52,21 @@ describe("RunBenchmarkForm", () => {
   });
 
   it("starts a run and navigates to it", async () => {
-    const fetch = mockFetch(() => jsonResponse({ id: "run-1", status: "queued" }, 202));
+    const invoke = mockInvoke({ start_run: () => ({ id: "run-1", status: "queued" }) });
     const { router } = await renderWithRouter(<RunBenchmarkForm benchmark={benchmark} />, { path: "/benchmarks" });
     fireEvent.change(textarea(), { target: { value: '{"repetitions": 1}' } });
     await userEvent.click(screen.getByRole("button", { name: "Start Run" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-1"));
-    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
-      benchmark_id: "inference.latency",
-      config: { repetitions: 1 },
-    });
+    expect(invoke.mock.calls[0]).toEqual([
+      "start_run",
+      { request: { benchmark_id: "inference.latency", config: { repetitions: 1 } } },
+    ]);
   });
 
   it("shows the no-model error with a link to Models", async () => {
-    mockFetch(() => jsonResponse({ error: { code: "no_model_loaded", message: "no model is loaded" } }, 409));
+    mockInvoke({
+      start_run: () => Promise.reject({ code: "no_model_loaded", message: "no model is loaded" }),
+    });
     const { router } = await renderWithRouter(<RunBenchmarkForm benchmark={benchmark} />, { path: "/benchmarks" });
     await userEvent.click(screen.getByRole("button", { name: "Start Run" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("No model is loaded.");

@@ -7,7 +7,7 @@ import { isActive } from "./useRuns";
 export function useRun(id: string) {
   return useQuery({
     queryKey: queryKeys.run(id),
-    queryFn: ({ signal }) => getRun(id, signal),
+    queryFn: () => getRun(id),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === undefined || isActive(status) ? 1000 : false;

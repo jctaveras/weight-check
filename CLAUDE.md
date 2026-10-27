@@ -110,7 +110,7 @@ Other test setups:
 Vite + React 19 single-page app, TypeScript, TanStack Router (file-based), TanStack Query, Tailwind CSS v4 (`@tailwindcss/vite`), Vitest + Testing Library. It builds to a static bundle in `ui/dist/` (the Tauri desktop shell will serve it). **Use pnpm, not npm.** Run commands from `ui/`:
 
 ```sh
-pnpm dev                                      # http://localhost:5173 (strictPort); needs the backend on :8787
+pnpm tauri dev                                # desktop app; starts `pnpm dev` (http://localhost:5173, strictPort) for the webview
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
 
@@ -119,15 +119,18 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
   - `/runs` filters live in the URL: `validateSearch` is `validateRunSearch` from `components/runs/runFilterParams.ts`; read with `Route.useSearch()`, update with `useNavigate({ from: "/runs/" })`.
   - Use `Link`/`useNavigate` from `@tanstack/react-router` with typed `to`/`params`/`search`, never raw URL strings.
 - Routes unmount when you navigate away, so form and mutation state resets on its own; in-flight mutations still finish and invalidate their queries.
-- The browser calls the backend directly at `VITE_API_URL` (default `http://127.0.0.1:8787`, typed in `src/vite-env.d.ts`). A later phase swaps fetch for Tauri `invoke`, so keep `lib/api/*` function signatures stable.
+- The UI talks to the Rust core through Tauri commands, never HTTP. `call<T>(command, args)` in `lib/api/client.ts` wraps `invoke` from `@tauri-apps/api/core`:
+  - Command names are snake_case; argument keys are camelCase (e.g. `load_model({ request })`, `list_runs({ filter })`, `get_run({ id })`). Each command resolves with the same JSON the types in `types.ts` describe.
+  - A rejected `{ code, message }` becomes `ApiError(code, message)`; a string rejection (Tauri argument deserialization) becomes `validation`; anything else `unknown`. Outside Tauri (`isTauri()` false, e.g. a plain browser tab) every call throws a `network` ApiError pointing at `pnpm tauri dev`.
+  - `vite.config.ts` is set up for Tauri (`clearScreen: false`, `envPrefix` includes `TAURI_ENV_*`, webview `build.target`). The `src-tauri/` shell lives outside `ui/`.
 - Layers mirror the backend:
-  - `lib/api/` holds the fetch client, one function per endpoint and the TS mirrors of the Rust types. Update `types.ts` when backend DTOs change.
+  - `lib/api/` holds the command client, one function per command and the TS mirrors of the Rust types. Update `types.ts` when Rust DTOs change.
   - `lib/queries/` holds the TanStack Query hooks (plain `useQuery`/`useMutation`).
   - `components/ui/` holds the primitives, and `components/<feature>/` the feature components.
   - Route files in `src/routes/` only compose components.
 - Component files export only components (react-refresh lint rule); put shared helpers in a `.ts` module (e.g. `components/ui/buttonClasses.ts`).
 - Put form and parsing logic in pure modules (e.g. `components/models/loadForm.ts`, `components/benchmarks/configJson.ts`) and unit-test them.
-- Tests are `*.test.ts(x)` files next to their source. `src/test/render.tsx` provides `renderWithQuery`, `renderWithRouter` (async; memory router, for components using `Link`/`useNavigate`, returns `router` to assert on `router.state.location`), `mockFetch` and `jsonResponse`.
+- Tests are `*.test.ts(x)` files next to their source. `src/test/render.tsx` provides `renderWithQuery`, `renderWithRouter` (async; memory router, for components using `Link`/`useNavigate`, returns `router` to assert on `router.state.location`) and `mockInvoke({ command: (args) => result })`. `mockInvoke` builds on `mockIPC` from `@tauri-apps/api/mocks`, makes `isTauri()` true and returns a spy whose calls are `[command, args]`; throw or reject `{ code, message }` from a handler to simulate a command error. `src/test/setup.ts` clears the mocks after each test.
 - Follow the Vercel Web Interface Guidelines (`/web-design-guidelines`):
   - labelled inputs, visible `:focus-visible` rings
   - `…` in loading text, `tabular-nums` for numbers, `Intl` formatting

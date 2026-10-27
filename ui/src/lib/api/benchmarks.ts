@@ -1,5 +1,4 @@
-import { apiFetch } from "./client";
+import { call } from "./client";
 import type { CategoryCatalog } from "./types";
 
-export const getCatalog = (signal?: AbortSignal) =>
-  apiFetch<CategoryCatalog[]>("/benchmarks", { signal });
+export const getCatalog = () => call<CategoryCatalog[]>("benchmark_catalog");

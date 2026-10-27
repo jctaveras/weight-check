@@ -6,6 +6,8 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
+import type { InvokeArgs } from "@tauri-apps/api/core";
+import { mockIPC } from "@tauri-apps/api/mocks";
 import { act, render, type RenderOptions } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { vi } from "vitest";
@@ -49,16 +51,22 @@ export async function renderWithRouter(ui: ReactElement, { path = "/" }: { path?
   return { client, router, ...result };
 }
 
-export function jsonResponse(body: unknown, status = 200) {
-  return new Response(status === 204 ? null : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+export type InvokeHandler = (args: Record<string, unknown>) => unknown;
 
-/** Stubs global fetch; returns the mock so tests can inspect calls. */
-export function mockFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
-  const fn = vi.fn((input: RequestInfo | URL, init?: RequestInit) => Promise.resolve(handler(String(input), init)));
-  vi.stubGlobal("fetch", fn);
+/**
+ * Mocks Tauri IPC: each command name maps to a handler that receives the invoke args and
+ * returns the result (or throws/rejects to simulate a command error, e.g. `{ code, message }`).
+ * Unhandled commands reject with a `not_found` envelope. Returns the spy so tests can inspect
+ * `mock.calls` as `[command, args]`. Cleared after each test by `src/test/setup.ts`.
+ */
+export function mockInvoke(handlers: Record<string, InvokeHandler> = {}) {
+  const fn = vi.fn((command: string, args?: InvokeArgs) => {
+    const handler = handlers[command];
+    if (!handler) throw { code: "not_found", message: `no mock for command ${command}` };
+    return handler((args ?? {}) as Record<string, unknown>);
+  });
+  mockIPC(fn);
+  // `isTauri()` reads `globalThis.isTauri`, which mockIPC doesn't set.
+  vi.stubGlobal("isTauri", true);
   return fn;
 }

@@ -55,15 +55,15 @@ cd backend && cargo run       # listens on 127.0.0.1:8787 by default
 
 The SQLite file (`weight-check.db` by default) is created on first start, and migrations run automatically.
 
-### Frontend
+### UI
 
-A Next.js UI lives in [`frontend/`](frontend/) and needs Node 22+ and pnpm:
+A Vite + React UI lives in [`ui/`](ui/) and needs Node 22+ and pnpm:
 
 ```sh
-cd frontend && pnpm install && pnpm dev   # http://localhost:3000, talks to the backend on :8787
+cd ui && pnpm install && pnpm dev   # http://localhost:5173, talks to the backend on :8787
 ```
 
-From the UI you can load a model, start benchmarks, and watch runs complete with their metrics. Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if the backend listens somewhere else.
+From the UI you can load a model, start benchmarks, and watch runs complete with their metrics. Set `VITE_API_URL` in `ui/.env.local` if the backend listens somewhere else.
 
 ## API
 
@@ -112,6 +112,6 @@ Only one benchmark runs at a time. While a run is active, the model cannot be un
 cd backend
 cargo test                                                     # unit + SQLite integration tests (temp DB files)
 
-cd frontend
+cd ui
 pnpm test                                                      # Vitest component and unit tests
 ```

@@ -8,4 +8,5 @@ export const queryKeys = {
   runs: (filter: RunFilter = {}) => ["runs", "list", filter] as const,
   runsAll: ["runs"] as const,
   run: (id: string) => ["runs", "detail", id] as const,
+  compare: (ids: string[]) => ["runs", "compare", ids] as const,
 };

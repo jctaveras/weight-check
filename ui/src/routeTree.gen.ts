@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BenchmarksRouteImport } from './routes/benchmarks'
+import { Route as CompareRouteImport } from './routes/compare'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const BenchmarksRoute = BenchmarksRouteImport.update({
   id: '/benchmarks',
   path: '/benchmarks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompareRoute = CompareRouteImport.update({
+  id: '/compare',
+  path: '/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsRoute = ModelsRouteImport.update({
@@ -44,6 +50,7 @@ const RunsIdRoute = RunsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/benchmarks': typeof BenchmarksRoute
+  '/compare': typeof CompareRoute
   '/models': typeof ModelsRoute
   '/runs/$id': typeof RunsIdRoute
   '/runs/': typeof RunsIndexRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/benchmarks': typeof BenchmarksRoute
+  '/compare': typeof CompareRoute
   '/models': typeof ModelsRoute
   '/runs/$id': typeof RunsIdRoute
   '/runs': typeof RunsIndexRoute
@@ -59,21 +67,31 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/benchmarks': typeof BenchmarksRoute
+  '/compare': typeof CompareRoute
   '/models': typeof ModelsRoute
   '/runs/$id': typeof RunsIdRoute
   '/runs/': typeof RunsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/benchmarks' | '/models' | '/runs/$id' | '/runs/'
+  fullPaths:
+    '/' | '/benchmarks' | '/compare' | '/models' | '/runs/$id' | '/runs/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/benchmarks' | '/models' | '/runs/$id' | '/runs'
-  id: '__root__' | '/' | '/benchmarks' | '/models' | '/runs/$id' | '/runs/'
+  to: '/' | '/benchmarks' | '/compare' | '/models' | '/runs/$id' | '/runs'
+  id:
+    | '__root__'
+    | '/'
+    | '/benchmarks'
+    | '/compare'
+    | '/models'
+    | '/runs/$id'
+    | '/runs/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BenchmarksRoute: typeof BenchmarksRoute
+  CompareRoute: typeof CompareRoute
   ModelsRoute: typeof ModelsRoute
   RunsIdRoute: typeof RunsIdRoute
   RunsIndexRoute: typeof RunsIndexRoute
@@ -93,6 +111,13 @@ declare module '@tanstack/react-router' {
       path: '/benchmarks'
       fullPath: '/benchmarks'
       preLoaderRoute: typeof BenchmarksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compare': {
+      id: '/compare'
+      path: '/compare'
+      fullPath: '/compare'
+      preLoaderRoute: typeof CompareRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models': {
@@ -122,6 +147,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BenchmarksRoute: BenchmarksRoute,
+  CompareRoute: CompareRoute,
   ModelsRoute: ModelsRoute,
   RunsIdRoute: RunsIdRoute,
   RunsIndexRoute: RunsIndexRoute,

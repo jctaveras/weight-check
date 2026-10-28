@@ -7,10 +7,13 @@ use uuid::Uuid;
 
 use super::benchmarks::{BenchmarkContext, CategoryCatalog, Registry};
 use super::model_service::ModelSession;
-use crate::domain::{Metric, NewRun, Run, RunFilter};
+use crate::domain::{Metric, NewRun, Run, RunFilter, RunStatus};
 use crate::error::{AppError, AppResult};
 use crate::infra::monitor::{GpuMonitor, HostMonitor};
 use crate::repository::RunRepository;
+
+/// Most runs `compare_runs` accepts at once.
+pub const MAX_COMPARE_RUNS: usize = 8;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunWithMetrics {
@@ -128,6 +131,33 @@ impl BenchmarkService {
             .ok_or_else(|| AppError::NotFound(format!("run {id}")))?;
         let metrics = self.runs.metrics(id).await?;
         Ok(RunWithMetrics { run, metrics })
+    }
+
+    /// Completed runs of one benchmark with their metrics, in the order of `ids`.
+    pub async fn compare_runs(&self, ids: Vec<Uuid>) -> AppResult<Vec<RunWithMetrics>> {
+        if !(1..=MAX_COMPARE_RUNS).contains(&ids.len()) {
+            return Err(AppError::Validation(format!(
+                "compare between 1 and {MAX_COMPARE_RUNS} runs"
+            )));
+        }
+        if ids.iter().enumerate().any(|(i, id)| ids[..i].contains(id)) {
+            return Err(AppError::Validation("run ids must be unique".into()));
+        }
+
+        let mut runs = Vec::with_capacity(ids.len());
+        for id in ids {
+            runs.push(self.get_run(id).await?);
+        }
+        let benchmark = &runs[0].run.benchmark_name;
+        if runs
+            .iter()
+            .any(|r| r.run.status != RunStatus::Completed || &r.run.benchmark_name != benchmark)
+        {
+            return Err(AppError::Validation(
+                "runs must all be completed runs of the same benchmark".into(),
+            ));
+        }
+        Ok(runs)
     }
 
     pub async fn list_runs(&self, filter: RunFilter) -> AppResult<Vec<Run>> {

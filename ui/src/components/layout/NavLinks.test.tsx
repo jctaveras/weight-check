@@ -21,3 +21,9 @@ describe("NavLinks", () => {
     expect(link("Dashboard")).toHaveClass("text-muted");
   });
 });
+
+it("links the Compare page", async () => {
+  await renderWithRouter(<NavLinks />, { path: "/compare?benchmark=x" });
+  expect(link("Compare")).toHaveAttribute("aria-current", "page");
+  expect(link("Runs")).not.toHaveAttribute("aria-current");
+});

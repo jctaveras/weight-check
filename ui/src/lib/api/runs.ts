@@ -14,3 +14,6 @@ export const listRuns = (filter: RunFilter = {}) =>
 export const getRun = (id: string) => call<RunWithMetrics>("get_run", { id });
 
 export const startRun = (request: StartRunRequest) => call<Run>("start_run", { request });
+
+/** Completed runs of one benchmark with their metrics, in the order of `ids`. */
+export const compareRuns = (ids: string[]) => call<RunWithMetrics[]>("compare_runs", { ids });

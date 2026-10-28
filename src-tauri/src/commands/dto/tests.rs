@@ -84,3 +84,11 @@ fn parse_run_id_accepts_uuids_only() {
     let err = parse_run_id("not-a-uuid").unwrap_err();
     assert_eq!(err.to_string(), "invalid run id 'not-a-uuid'");
 }
+
+#[test]
+fn parse_run_ids_rejects_any_malformed_id() {
+    let id = Uuid::new_v4();
+    assert_eq!(parse_run_ids(&[id.to_string()]).unwrap(), [id]);
+    let err = parse_run_ids(&[id.to_string(), "nope".into()]).unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}

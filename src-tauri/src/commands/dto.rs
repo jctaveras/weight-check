@@ -21,6 +21,11 @@ pub fn parse_run_id(id: &str) -> Result<Uuid, AppError> {
         .map_err(|_| AppError::Validation(format!("invalid run id '{id}'")))
 }
 
+/// Parses every id of `compare_runs`, failing on the first malformed one.
+pub fn parse_run_ids(ids: &[String]) -> Result<Vec<Uuid>, AppError> {
+    ids.iter().map(|id| parse_run_id(id)).collect()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoadModelRequest {

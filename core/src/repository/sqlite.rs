@@ -339,9 +339,14 @@ impl RunRepository for SqliteStore {
         if let Some(name) = &filter.benchmark_name {
             qb.push(" AND benchmark_name = ").push_bind(name.clone());
         }
+        if let Some(status) = filter.status {
+            qb.push(" AND status = ").push_bind(status.as_str());
+        }
         // rowid breaks ties between runs created within the same clock tick.
         qb.push(" ORDER BY created_at DESC, rowid DESC LIMIT ")
-            .push_bind(filter.limit.unwrap_or(100));
+            .push_bind(filter.limit.unwrap_or(100))
+            .push(" OFFSET ")
+            .push_bind(filter.offset.unwrap_or(0));
 
         qb.build_query_as::<RunRow>()
             .fetch_all(&self.pool)

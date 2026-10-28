@@ -44,13 +44,24 @@ export function RunDetail({ id }: { id: string }) {
           </>
         }
         actions={
-          <Link
-            to="/runs"
-            search={{ benchmark: run.benchmark_name }}
-            className="text-sm text-muted underline-offset-2 hover:text-fg hover:underline"
-          >
-            Compare with past runs
-          </Link>
+          <>
+            <Link
+              to="/runs"
+              search={{ benchmark: run.benchmark_name }}
+              className="text-sm text-muted underline-offset-2 hover:text-fg hover:underline"
+            >
+              Past runs
+            </Link>
+            {run.status === "completed" && (
+              <Link
+                to="/compare"
+                search={{ benchmark: run.benchmark_name, runs: run.id }}
+                className="text-sm text-muted underline-offset-2 hover:text-fg hover:underline"
+              >
+                Compare With Other Runs
+              </Link>
+            )}
+          </>
         }
       />
 

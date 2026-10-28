@@ -120,3 +120,26 @@ fn run_commands_take_request_filter_and_id() {
         .unwrap_err();
     assert_eq!(err["code"], "validation");
 }
+
+#[test]
+fn compare_runs_takes_ids() {
+    let ipc = ipc(true);
+    let request =
+        json!({"request": {"benchmark_id": "inference.latency", "config": {"repetitions": 1}}});
+    let run = ipc.invoke("start_run", request).unwrap();
+    let args = json!({"id": run["id"]});
+    for _ in 0..500 {
+        if ipc.invoke("get_run", args.clone()).unwrap()["status"] == "completed" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let runs = ipc
+        .invoke("compare_runs", json!({"ids": [run["id"]]}))
+        .unwrap();
+    assert_eq!(runs[0]["id"], run["id"]);
+    assert!(runs[0]["metrics"].is_array());
+    let err = ipc.invoke("compare_runs", json!({"ids": []})).unwrap_err();
+    assert_eq!(err["code"], "validation");
+}

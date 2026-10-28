@@ -161,4 +161,76 @@ async fn get_and_list_runs() {
             Err(AppError::Validation(_))
         ));
     }
+    assert!(matches!(
+        service
+            .list_runs(RunFilter {
+                offset: Some(-1),
+                ..Default::default()
+            })
+            .await,
+        Err(AppError::Validation(_))
+    ));
+}
+
+async fn seed_run(runs: &InMemoryRuns, benchmark: &str, completed: bool) -> Uuid {
+    let run = runs
+        .create(NewRun {
+            model_id: Uuid::new_v4(),
+            hardware_id: Uuid::new_v4(),
+            category: crate::domain::Category::InferencePerformance,
+            benchmark_name: benchmark.into(),
+            config: json!({}),
+        })
+        .await
+        .unwrap();
+    if completed {
+        let metrics = [Metric::new("generation_tps_mean", 42.0, "tok/s")];
+        runs.complete(run.id, json!({}), &metrics).await.unwrap();
+    }
+    run.id
+}
+
+#[tokio::test]
+async fn compare_runs_returns_metrics_in_request_order() {
+    let (service, runs) = service(FakeSession::loaded());
+    let a = seed_run(&runs, "inference.latency", true).await;
+    let b = seed_run(&runs, "inference.latency", true).await;
+
+    let compared = service.compare_runs(vec![b, a]).await.unwrap();
+    let ids: Vec<Uuid> = compared.iter().map(|r| r.run.id).collect();
+    assert_eq!(ids, [b, a]);
+    assert!(compared.iter().all(|r| r.metrics.len() == 1));
+}
+
+#[tokio::test]
+async fn compare_runs_validates_ids() {
+    let (service, runs) = service(FakeSession::loaded());
+    let a = seed_run(&runs, "inference.latency", true).await;
+
+    let too_many = vec![a; MAX_COMPARE_RUNS + 1];
+    for ids in [vec![], too_many, vec![a, a]] {
+        assert!(matches!(
+            service.compare_runs(ids).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+    assert!(matches!(
+        service.compare_runs(vec![a, Uuid::new_v4()]).await,
+        Err(AppError::NotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn compare_runs_requires_completed_runs_of_one_benchmark() {
+    let (service, runs) = service(FakeSession::loaded());
+    let a = seed_run(&runs, "inference.latency", true).await;
+    let other = seed_run(&runs, "inference.throughput", true).await;
+    let queued = seed_run(&runs, "inference.latency", false).await;
+
+    for ids in [vec![a, other], vec![a, queued]] {
+        assert!(matches!(
+            service.compare_runs(ids).await,
+            Err(AppError::Validation(_))
+        ));
+    }
 }

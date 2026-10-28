@@ -4,7 +4,7 @@
 //! `Result`, hence `Ok(...)` around the infallible ones.
 //!
 //! Command names are snake_case. Tauri maps camelCase JS argument keys to these snake_case
-//! parameters; the single-word `request`, `filter` and `id` are the same in both.
+//! parameters; the single-word `request`, `filter`, `id` and `ids` are the same in both.
 
 use serde_json::Value;
 use tauri::ipc::Invoke;
@@ -71,6 +71,14 @@ pub async fn get_run(state: State<'_, AppState>, id: String) -> CommandResult<Ru
     super::get_run(&state, &id).await
 }
 
+#[tauri::command]
+pub async fn compare_runs(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> CommandResult<Vec<RunWithMetrics>> {
+    super::compare_runs(&state, &ids).await
+}
+
 /// Every command, for `Builder::invoke_handler`.
 pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
@@ -84,6 +92,7 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         list_runs,
         start_run,
         get_run,
+        compare_runs,
     ]
 }
 

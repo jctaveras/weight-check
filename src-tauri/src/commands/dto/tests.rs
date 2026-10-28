@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use weight_check_core::domain::Category;
+use weight_check_core::domain::{Category, RunStatus};
 
 #[test]
 fn run_query_parses_category() {
@@ -9,13 +9,17 @@ fn run_query_parses_category() {
         model_id: None,
         category: Some("agentic".into()),
         benchmark: Some("x".into()),
+        status: Some("completed".into()),
         limit: Some(5),
+        offset: Some(10),
     }
     .try_into()
     .unwrap();
     assert_eq!(filter.category, Some(Category::Agentic));
     assert_eq!(filter.benchmark_name.as_deref(), Some("x"));
+    assert_eq!(filter.status, Some(RunStatus::Completed));
     assert_eq!(filter.limit, Some(5));
+    assert_eq!(filter.offset, Some(10));
 }
 
 #[test]
@@ -24,7 +28,19 @@ fn run_query_rejects_unknown_category() {
         model_id: None,
         category: Some("nope".into()),
         benchmark: None,
+        status: None,
         limit: None,
+        offset: None,
+    })
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+#[test]
+fn run_query_rejects_unknown_status() {
+    let err = RunFilter::try_from(RunQuery {
+        status: Some("done".into()),
+        ..Default::default()
     })
     .unwrap_err();
     assert!(matches!(err, AppError::Validation(_)));
@@ -38,11 +54,13 @@ fn run_query_defaults_missing_fields_and_rejects_unknown_ones() {
 
     let id = Uuid::new_v4();
     let full: RunQuery = parse(json!({
-        "model_id": id, "category": "agentic", "benchmark": "b", "limit": 3
+        "model_id": id, "category": "agentic", "benchmark": "b", "status": "failed", "limit": 3, "offset": 6
     }))
     .unwrap();
     assert_eq!(full.model_id, Some(id));
     assert_eq!(full.limit, Some(3));
+    assert_eq!(full.status.as_deref(), Some("failed"));
+    assert_eq!(full.offset, Some(6));
 
     for bad in [json!({"unknown": 1}), json!({"limit": "x"}), json!("x")] {
         let err = parse::<RunQuery>(bad.clone()).unwrap_err();
@@ -83,4 +101,12 @@ fn parse_run_id_accepts_uuids_only() {
     assert_eq!(parse_run_id(&id.to_string()).unwrap(), id);
     let err = parse_run_id("not-a-uuid").unwrap_err();
     assert_eq!(err.to_string(), "invalid run id 'not-a-uuid'");
+}
+
+#[test]
+fn parse_run_ids_rejects_any_malformed_id() {
+    let id = Uuid::new_v4();
+    assert_eq!(parse_run_ids(&[id.to_string()]).unwrap(), [id]);
+    let err = parse_run_ids(&[id.to_string(), "nope".into()]).unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
 }

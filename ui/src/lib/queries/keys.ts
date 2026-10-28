@@ -6,6 +6,8 @@ export const queryKeys = {
   modelStatus: ["models", "status"] as const,
   catalog: ["benchmarks"] as const,
   runs: (filter: RunFilter = {}) => ["runs", "list", filter] as const,
+  runPages: (filter: RunFilter = {}) => ["runs", "pages", filter] as const,
   runsAll: ["runs"] as const,
   run: (id: string) => ["runs", "detail", id] as const,
+  compare: (ids: string[]) => ["runs", "compare", ids] as const,
 };

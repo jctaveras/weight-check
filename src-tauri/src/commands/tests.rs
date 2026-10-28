@@ -199,6 +199,43 @@ async fn runs_map_errors() {
     }
 }
 
+/// Starts a latency run and waits until it is no longer queued or running.
+async fn completed_run(app: &TestApp) -> String {
+    let request = json!({"benchmark_id": "inference.latency", "config": {"repetitions": 1}});
+    let run = ipc(start_run(&app.state, request).await).unwrap();
+    let id = run["id"].as_str().unwrap().to_string();
+    for _ in 0..500 {
+        let body = ipc(get_run(&app.state, &id).await).unwrap();
+        if body["status"] == "completed" {
+            return id;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("run {id} did not complete");
+}
+
+#[tokio::test]
+async fn compare_runs_returns_runs_with_metrics() {
+    let app = app(true).await;
+    let a = completed_run(&app).await;
+    let b = completed_run(&app).await;
+
+    let body = ipc(compare_runs(&app.state, &[b.clone(), a.clone()]).await).unwrap();
+    let runs = body.as_array().unwrap();
+    assert_eq!(runs[0]["id"], b.as_str());
+    assert_eq!(runs[1]["id"], a.as_str());
+    assert!(
+        runs.iter()
+            .all(|r| !r["metrics"].as_array().unwrap().is_empty())
+    );
+
+    assert_eq!(code(compare_runs(&app.state, &[]).await), "validation");
+    let bad = [a.clone(), "nope".to_string()];
+    assert_eq!(code(compare_runs(&app.state, &bad).await), "validation");
+    let missing = [a, Uuid::new_v4().to_string()];
+    assert_eq!(code(compare_runs(&app.state, &missing).await), "not_found");
+}
+
 #[tokio::test]
 async fn start_run_without_a_loaded_model() {
     let mut app = app(true).await;

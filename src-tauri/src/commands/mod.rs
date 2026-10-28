@@ -92,5 +92,11 @@ pub async fn get_run(state: &AppState, id: &str) -> CommandResult<RunWithMetrics
     Ok(state.benchmarks.get_run(id).await?)
 }
 
+/// Completed runs of one benchmark, with metrics, for the Compare page.
+pub async fn compare_runs(state: &AppState, ids: &[String]) -> CommandResult<Vec<RunWithMetrics>> {
+    let ids = dto::parse_run_ids(ids)?;
+    Ok(state.benchmarks.compare_runs(ids).await?)
+}
+
 #[cfg(test)]
 mod tests;

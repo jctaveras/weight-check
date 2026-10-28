@@ -21,6 +21,11 @@ pub fn parse_run_id(id: &str) -> Result<Uuid, AppError> {
         .map_err(|_| AppError::Validation(format!("invalid run id '{id}'")))
 }
 
+/// Parses every id of `compare_runs`, failing on the first malformed one.
+pub fn parse_run_ids(ids: &[String]) -> Result<Vec<Uuid>, AppError> {
+    ids.iter().map(|id| parse_run_id(id)).collect()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoadModelRequest {
@@ -57,7 +62,9 @@ pub struct RunQuery {
     pub model_id: Option<Uuid>,
     pub category: Option<String>,
     pub benchmark: Option<String>,
+    pub status: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 impl TryFrom<RunQuery> for RunFilter {
@@ -72,7 +79,13 @@ impl TryFrom<RunQuery> for RunFilter {
                 .transpose()
                 .map_err(AppError::Validation)?,
             benchmark_name: q.benchmark,
+            status: q
+                .status
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(AppError::Validation)?,
             limit: q.limit,
+            offset: q.offset,
         })
     }
 }

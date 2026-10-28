@@ -1,0 +1,29 @@
+[package]
+name = "weight-check-core"
+version.workspace = true
+edition.workspace = true
+description = "Model lifecycle, benchmarks and storage behind the weight-check desktop app"
+
+[features]
+# Exposes the in-memory fakes in `service::testing` to other crates' tests.
+testing = []
+
+[dependencies]
+async-trait.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "uuid", "chrono", "json", "migrate", "macros"] }
+sysinfo = "0.33"
+thiserror = "2"
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+# Stand-in llama-server for the `LlamaHttpClient` tests.
+axum = "0.8"
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
@@ -5,7 +6,8 @@ import { LoadingText } from "@/components/ui/LoadingText";
 import type { Run } from "@/lib/api/types";
 import { formatDateTime } from "@/lib/format";
 import { useLookups } from "@/lib/queries/useLookups";
-import { useRuns } from "@/lib/queries/useRuns";
+import { useRunPages } from "@/lib/queries/useRunPages";
+import { useRunsById } from "@/lib/queries/useRunsById";
 import { settingsLabel } from "./comparison";
 import { MAX_COMPARE_RUNS } from "./compareParams";
 
@@ -15,16 +17,27 @@ interface RunPickerProps {
   onToggle: (id: string) => void;
 }
 
-/** Completed runs of `benchmark`, newest first, each with a checkbox to add it to the comparison. */
+/**
+ * Completed runs of `benchmark`, newest first, each with a checkbox to add it to the comparison.
+ * Older runs load a page at a time; picked runs that aren't on a loaded page are pinned on top so
+ * they can still be deselected.
+ */
 export function RunPicker({ benchmark, selected, onToggle }: RunPickerProps) {
-  const { data, error, isPending } = useRuns({ benchmark, limit: 200 });
+  const pages = useRunPages({ benchmark, status: "completed" });
+  const listedIds = new Set(pages.data?.map((r) => r.id));
+  const unlisted = pages.data ? selected.filter((id) => !listedIds.has(id)) : [];
+  const pinned = useRunsById(unlisted);
   const { modelName } = useLookups();
 
-  if (isPending) return <LoadingText>Loading runs…</LoadingText>;
-  if (error) return <ErrorMessage error={error} title="Couldn't load runs" />;
+  if (pages.isPending || pinned.some((q) => q.isPending)) {
+    return <LoadingText>Loading runs…</LoadingText>;
+  }
+  // A failed "load older" keeps the pages already shown; only a failed first page replaces them.
+  if (!pages.data) return <ErrorMessage error={pages.error} title="Couldn't load runs" />;
 
-  const runs = data.filter((r) => r.status === "completed");
-  if (runs.length === 0) {
+  const missing = unlisted.filter((_, i) => pinned[i].isError);
+  const runs = [...pinned.flatMap((q) => (q.data ? [q.data] : [])), ...pages.data];
+  if (runs.length === 0 && missing.length === 0) {
     return (
       <EmptyState title="No Completed Runs">
         Run this benchmark on a model first; finished runs show up here.
@@ -83,9 +96,35 @@ export function RunPicker({ benchmark, selected, onToggle }: RunPickerProps) {
         {selected.length} of {MAX_COMPARE_RUNS} runs selected
         {full && "; deselect one to add another"}.
       </p>
+      {missing.map((id) => (
+        <p key={id} className="flex items-center gap-2 text-sm text-danger">
+          <span>
+            Run <span className="font-mono" translate="no">{id}</span> couldn&rsquo;t be loaded. Remove it from the
+            comparison.
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => onToggle(id)}>
+            Remove
+          </Button>
+        </p>
+      ))}
       <div className="max-h-80 overflow-y-auto">
         <DataTable caption="Completed runs to compare" columns={columns} rows={runs} rowKey={(r) => r.id} />
       </div>
+      {pages.hasNextPage && (
+        <div>
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={pages.isFetchingNextPage}
+            onClick={() => void pages.fetchNextPage()}
+          >
+            {pages.isFetchingNextPage ? "Loading Older Runs…" : "Load Older Runs"}
+          </Button>
+        </div>
+      )}
+      {pages.isFetchNextPageError && (
+        <ErrorMessage error={pages.error} title="Couldn't load older runs" />
+      )}
     </div>
   );
 }

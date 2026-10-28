@@ -166,6 +166,9 @@ impl BenchmarkService {
                 "limit must be between 1 and 1000".into(),
             ));
         }
+        if filter.offset.is_some_and(|o| o < 0) {
+            return Err(AppError::Validation("offset must not be negative".into()));
+        }
         self.runs.list(&filter).await
     }
 }

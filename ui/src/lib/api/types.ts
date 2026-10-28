@@ -152,5 +152,8 @@ export interface RunFilter {
   model_id?: Uuid;
   category?: Category;
   benchmark?: string;
+  status?: RunStatus;
   limit?: number;
+  /** Rows to skip before `limit`, for paging through older runs. */
+  offset?: number;
 }

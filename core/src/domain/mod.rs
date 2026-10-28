@@ -224,7 +224,10 @@ pub struct RunFilter {
     pub model_id: Option<Uuid>,
     pub category: Option<Category>,
     pub benchmark_name: Option<String>,
+    pub status: Option<RunStatus>,
     pub limit: Option<i64>,
+    /// Rows to skip before `limit`, for paging through older runs.
+    pub offset: Option<i64>,
 }
 
 /// llama-server settings a model was loaded with.

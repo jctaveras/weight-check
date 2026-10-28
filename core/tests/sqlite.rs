@@ -288,6 +288,60 @@ async fn list_filters_by_name_and_limit() {
 }
 
 #[tokio::test]
+async fn list_filters_by_status_and_pages_with_offset() {
+    let (_dir, store) = store().await;
+    let (model_id, hardware_id) = model_and_hardware(&store).await;
+    let new = || new_run(model_id, hardware_id, Category::Agentic, "a");
+    // Two old completed runs, buried under a full page of newer failed runs.
+    let mut completed = Vec::new();
+    for _ in 0..2 {
+        let run = store.create(new()).await.unwrap();
+        store.complete(run.id, json!({}), &[]).await.unwrap();
+        completed.push(run.id);
+    }
+    for _ in 0..3 {
+        let run = store.create(new()).await.unwrap();
+        store.fail(run.id, "boom").await.unwrap();
+    }
+    let filter = |status, limit, offset| RunFilter {
+        status,
+        limit,
+        offset,
+        ..Default::default()
+    };
+
+    let newest = store.list(&filter(None, Some(3), None)).await.unwrap();
+    assert!(newest.iter().all(|r| r.status == RunStatus::Failed));
+
+    let ids = |runs: Vec<weight_check_core::domain::Run>| -> Vec<Uuid> {
+        runs.into_iter().map(|r| r.id).collect()
+    };
+    let done = store
+        .list(&filter(Some(RunStatus::Completed), Some(3), None))
+        .await
+        .unwrap();
+    assert!(done.iter().all(|r| r.status == RunStatus::Completed));
+    completed.reverse();
+    assert_eq!(ids(done), completed);
+
+    let first = store
+        .list(&filter(Some(RunStatus::Completed), Some(1), None))
+        .await
+        .unwrap();
+    let second = store
+        .list(&filter(Some(RunStatus::Completed), Some(1), Some(1)))
+        .await
+        .unwrap();
+    assert_eq!(ids(first), completed[..1]);
+    assert_eq!(ids(second), completed[1..]);
+    let past_end = store
+        .list(&filter(Some(RunStatus::Completed), Some(1), Some(2)))
+        .await
+        .unwrap();
+    assert!(past_end.is_empty());
+}
+
+#[tokio::test]
 async fn lookups_of_unknown_ids_return_none_and_ping_works() {
     let (_dir, store) = store().await;
     assert!(

@@ -161,6 +161,15 @@ async fn get_and_list_runs() {
             Err(AppError::Validation(_))
         ));
     }
+    assert!(matches!(
+        service
+            .list_runs(RunFilter {
+                offset: Some(-1),
+                ..Default::default()
+            })
+            .await,
+        Err(AppError::Validation(_))
+    ));
 }
 
 async fn seed_run(runs: &InMemoryRuns, benchmark: &str, completed: bool) -> Uuid {

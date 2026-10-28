@@ -62,7 +62,9 @@ pub struct RunQuery {
     pub model_id: Option<Uuid>,
     pub category: Option<String>,
     pub benchmark: Option<String>,
+    pub status: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 impl TryFrom<RunQuery> for RunFilter {
@@ -77,7 +79,13 @@ impl TryFrom<RunQuery> for RunFilter {
                 .transpose()
                 .map_err(AppError::Validation)?,
             benchmark_name: q.benchmark,
+            status: q
+                .status
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(AppError::Validation)?,
             limit: q.limit,
+            offset: q.offset,
         })
     }
 }

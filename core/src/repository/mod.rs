@@ -31,6 +31,10 @@ pub trait RunRepository: Send + Sync {
     /// Store the outcome and its metrics atomically.
     async fn complete(&self, id: Uuid, details: Value, metrics: &[Metric]) -> AppResult<()>;
     async fn fail(&self, id: Uuid, error: &str) -> AppResult<()>;
+    /// Marks a queued or running run as cancelled; `false` if it had already finished.
+    async fn cancel(&self, id: Uuid) -> AppResult<bool>;
+    /// Deletes a run and its metrics; `false` if there was no such run.
+    async fn delete(&self, id: Uuid) -> AppResult<bool>;
     async fn get(&self, id: Uuid) -> AppResult<Option<Run>>;
     async fn list(&self, filter: &RunFilter) -> AppResult<Vec<Run>>;
     async fn metrics(&self, run_id: Uuid) -> AppResult<Vec<Metric>>;

@@ -19,6 +19,7 @@ fn run_status_parses_known_values_only() {
         RunStatus::Running,
         RunStatus::Completed,
         RunStatus::Failed,
+        RunStatus::Cancelled,
     ] {
         assert_eq!(s.as_str().parse::<RunStatus>().unwrap(), s);
     }

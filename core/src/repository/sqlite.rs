@@ -70,6 +70,10 @@ const MODEL_COLUMNS: &str = "id, name, file_path, architecture, quantization, si
 const RUN_COLUMNS: &str = "id, model_id, hardware_id, category, benchmark_name, status, config, \
      details, error, started_at, finished_at, created_at";
 
+/// Runs that may still change status. Once finished (completed, failed, cancelled) a run's
+/// status is final.
+const UNFINISHED: &str = "status IN ('queued', 'running')";
+
 #[derive(FromRow)]
 struct ModelRow {
     id: Hyphenated,
@@ -265,29 +269,36 @@ impl RunRepository for SqliteStore {
     }
 
     async fn mark_running(&self, id: Uuid) -> AppResult<()> {
-        sqlx::query("UPDATE benchmark_runs SET status = 'running', started_at = ?2 WHERE id = ?1")
-            .bind(id.hyphenated())
-            .bind(Utc::now())
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
+        // A run cancelled while queued stays cancelled.
+        sqlx::query(
+            "UPDATE benchmark_runs SET status = 'running', started_at = ?2
+             WHERE id = ?1 AND status = 'queued'",
+        )
+        .bind(id.hyphenated())
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
         Ok(())
     }
 
     async fn complete(&self, id: Uuid, details: Value, metrics: &[Metric]) -> AppResult<()> {
         let mut tx = self.pool.begin().await.map_err(db_err)?;
-        sqlx::query(
+        // Only an unfinished run completes: a run cancelled meanwhile keeps that status and
+        // gets no metrics.
+        let updated = sqlx::query(&format!(
             "UPDATE benchmark_runs SET status = 'completed', details = ?2, finished_at = ?3
-             WHERE id = ?1",
-        )
+             WHERE id = ?1 AND {UNFINISHED}"
+        ))
         .bind(id.hyphenated())
         .bind(Json(&details))
         .bind(Utc::now())
         .execute(&mut *tx)
         .await
-        .map_err(db_err)?;
+        .map_err(db_err)?
+        .rows_affected();
 
-        if !metrics.is_empty() {
+        if updated > 0 && !metrics.is_empty() {
             let mut qb: QueryBuilder<Sqlite> =
                 QueryBuilder::new("INSERT INTO metrics (run_id, name, value, unit) ");
             qb.push_values(metrics, |mut b, m| {
@@ -302,10 +313,10 @@ impl RunRepository for SqliteStore {
     }
 
     async fn fail(&self, id: Uuid, error: &str) -> AppResult<()> {
-        sqlx::query(
+        sqlx::query(&format!(
             "UPDATE benchmark_runs SET status = 'failed', error = ?2, finished_at = ?3
-             WHERE id = ?1",
-        )
+             WHERE id = ?1 AND {UNFINISHED}"
+        ))
         .bind(id.hyphenated())
         .bind(error)
         .bind(Utc::now())
@@ -313,6 +324,30 @@ impl RunRepository for SqliteStore {
         .await
         .map_err(db_err)?;
         Ok(())
+    }
+
+    async fn cancel(&self, id: Uuid) -> AppResult<bool> {
+        let updated = sqlx::query(&format!(
+            "UPDATE benchmark_runs SET status = 'cancelled', finished_at = ?2
+             WHERE id = ?1 AND {UNFINISHED}"
+        ))
+        .bind(id.hyphenated())
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?
+        .rows_affected();
+        Ok(updated > 0)
+    }
+
+    async fn delete(&self, id: Uuid) -> AppResult<bool> {
+        let deleted = sqlx::query("DELETE FROM benchmark_runs WHERE id = ?1")
+            .bind(id.hyphenated())
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?
+            .rows_affected();
+        Ok(deleted > 0)
     }
 
     async fn get(&self, id: Uuid) -> AppResult<Option<Run>> {

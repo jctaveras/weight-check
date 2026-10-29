@@ -72,6 +72,16 @@ pub async fn get_run(state: State<'_, AppState>, id: String) -> CommandResult<Ru
 }
 
 #[tauri::command]
+pub async fn cancel_run(state: State<'_, AppState>, id: String) -> CommandResult<Run> {
+    super::cancel_run(&state, &id).await
+}
+
+#[tauri::command]
+pub async fn delete_run(state: State<'_, AppState>, id: String) -> CommandResult<()> {
+    super::delete_run(&state, &id).await
+}
+
+#[tauri::command]
 pub async fn compare_runs(
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -92,6 +102,8 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         list_runs,
         start_run,
         get_run,
+        cancel_run,
+        delete_run,
         compare_runs,
     ]
 }

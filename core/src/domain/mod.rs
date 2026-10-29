@@ -90,6 +90,8 @@ pub enum RunStatus {
     Running,
     Completed,
     Failed,
+    /// Stopped by the user before it finished.
+    Cancelled,
 }
 
 impl RunStatus {
@@ -99,6 +101,7 @@ impl RunStatus {
             RunStatus::Running => "running",
             RunStatus::Completed => "completed",
             RunStatus::Failed => "failed",
+            RunStatus::Cancelled => "cancelled",
         }
     }
 }
@@ -112,6 +115,7 @@ impl FromStr for RunStatus {
             "running" => Ok(RunStatus::Running),
             "completed" => Ok(RunStatus::Completed),
             "failed" => Ok(RunStatus::Failed),
+            "cancelled" => Ok(RunStatus::Cancelled),
             other => Err(format!("unknown run status '{other}'")),
         }
     }

@@ -28,7 +28,7 @@ export function RunsView({ filter }: { filter: RunFilter }) {
             and its results will show up here.
           </EmptyState>
         ) : (
-          <RunsTable runs={data} />
+          <RunsTable runs={data} deletable />
         )}
       </Card>
     </div>

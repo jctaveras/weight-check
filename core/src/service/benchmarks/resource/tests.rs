@@ -138,3 +138,24 @@ fn energy_is_integrated_over_busy_samples() {
     assert_eq!(get("gpu_util_avg_pct"), 90.0);
     assert_eq!(get("vram_peak_mb"), 1024.0);
 }
+
+#[tokio::test]
+async fn dropping_the_stop_guard_ends_the_sampler() {
+    // What a cancelled run does: `run` is dropped mid-workload, and the guard with it.
+    let stop = StopOnDrop(Arc::new(AtomicBool::new(false)));
+    let sampler = tokio::spawn(sample_loop(
+        None,
+        Arc::new(FakeHost),
+        None,
+        Duration::from_millis(10),
+        Arc::new(AtomicBool::new(false)),
+        stop.0.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    drop(stop);
+    let samples = tokio::time::timeout(Duration::from_secs(2), sampler)
+        .await
+        .expect("sampler stopped")
+        .unwrap();
+    assert!(!samples.is_empty());
+}

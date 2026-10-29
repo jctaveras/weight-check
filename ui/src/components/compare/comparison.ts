@@ -11,10 +11,18 @@ const NEUTRAL_NAMES = new Set(["concurrency", "gpu_layers_offloaded", "offload_p
 /** Summary statistics that clutter the overview; the table still lists them. */
 const NOISY_SUFFIXES = ["_min", "_max", "_stddev", "_p95"];
 
+/** Quality scores (accuracy, pass@k) share the `%` unit with neutral utilisation metrics. */
+function isScore(name: string): boolean {
+  return name === "accuracy" || name.endsWith("_acc") || name.startsWith("pass_at_");
+}
+
 export function metricDirection(name: string, unit: string): Direction {
   if (NEUTRAL_NAMES.has(name)) return "neutral";
   // Spread is worse whatever the unit.
   if (name.endsWith("_stddev")) return "lower";
+  if (isScore(name)) return "higher";
+  // Failure rates (invalid answers, timeouts).
+  if (name.endsWith("_rate")) return "lower";
   if (HIGHER_UNITS.has(unit)) return "higher";
   if (LOWER_UNITS.has(unit)) return "lower";
   return "neutral";

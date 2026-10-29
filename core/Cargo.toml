@@ -10,13 +10,20 @@ testing = []
 
 [dependencies]
 async-trait.workspace = true
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
+flate2 = "1"
 futures = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+parquet = { version = "60", default-features = false, features = ["json", "snap"] }
+regex = "1"
+# rustls (webpki roots) for HTTPS dataset downloads, without a system OpenSSL dependency.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.11"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "uuid", "chrono", "json", "migrate", "macros"] }
 sysinfo = "0.33"
+tempfile.workspace = true
 thiserror = "2"
 tokio.workspace = true
 tracing.workspace = true
@@ -25,5 +32,4 @@ uuid.workspace = true
 [dev-dependencies]
 # Stand-in llama-server for the `LlamaHttpClient` tests.
 axum = "0.8"
-tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

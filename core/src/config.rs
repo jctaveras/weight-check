@@ -10,6 +10,8 @@ pub struct Config {
     /// `None` disables the idle watchdog.
     pub idle_timeout: Option<Duration>,
     pub load_timeout: Duration,
+    /// Python 3 interpreter that runs generated code in the coding benchmark.
+    pub python_bin: PathBuf,
 }
 
 impl Config {
@@ -28,6 +30,7 @@ impl Config {
             models_dir: env_or("MODELS_DIR", "./models").into(),
             idle_timeout: (idle_secs > 0).then(|| Duration::from_secs(idle_secs)),
             load_timeout: Duration::from_secs(load_secs),
+            python_bin: env_or("PYTHON_BIN", "python3").into(),
         })
     }
 }

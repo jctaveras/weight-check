@@ -12,7 +12,7 @@ use weight_check_core::repository::ModelRepository;
 use weight_check_core::service::benchmarks::Registry;
 use weight_check_core::service::testing::{
     FakeGpu, FakeHealth, FakeHost, FakeLauncher, FakeSession, InMemoryHardware, InMemoryModels,
-    InMemoryRuns, gguf_bytes,
+    InMemoryRuns, fake_quality_deps, gguf_bytes,
 };
 
 pub(super) struct TestApp {
@@ -49,7 +49,7 @@ pub(super) async fn app(healthy: bool) -> TestApp {
             None,
         )),
         benchmarks: Arc::new(BenchmarkService::new(
-            Registry::default(),
+            Registry::standard(fake_quality_deps()),
             Arc::new(InMemoryRuns::default()),
             Arc::new(FakeSession::loaded()),
             None,
@@ -175,7 +175,7 @@ async fn runs_map_errors() {
     let app = app(true).await;
     let start = |body: Value| start_run(&app.state, body);
     assert_eq!(
-        code(start(json!({"benchmark_id": "quality.reasoning"})).await),
+        code(start(json!({"benchmark_id": "agentic.tool_calling"})).await),
         "not_implemented"
     );
     assert_eq!(
@@ -240,7 +240,7 @@ async fn compare_runs_returns_runs_with_metrics() {
 async fn start_run_without_a_loaded_model() {
     let mut app = app(true).await;
     app.state.benchmarks = Arc::new(BenchmarkService::new(
-        Registry::default(),
+        Registry::standard(fake_quality_deps()),
         Arc::new(InMemoryRuns::default()),
         Arc::new(FakeSession::empty()),
         None,

@@ -42,6 +42,13 @@ describe("metricDirection", () => {
     ["concurrency", "clients", "neutral"],
     ["offload_pct", "%", "neutral"],
     ["gpu_util_avg_pct", "%", "neutral"],
+    ["accuracy", "%", "higher"],
+    ["prompt_strict_acc", "%", "higher"],
+    ["pass_at_1", "%", "higher"],
+    ["invalid_rate", "%", "lower"],
+    ["timeout_rate", "%", "lower"],
+    ["items", "items", "neutral"],
+    ["completion_tokens_mean", "tok", "neutral"],
   ])("%s (%s) is %s", (name, unit, expected) => {
     expect(metricDirection(name, unit)).toBe(expected);
   });

@@ -11,13 +11,16 @@ use tracing_subscriber::EnvFilter;
 
 use weight_check_core::config::Config;
 use weight_check_core::error::AppError;
+use weight_check_core::infra::datasets::HttpDatasetStore;
 use weight_check_core::infra::llama::process::{LlamaServerLauncher, detect_backend};
 use weight_check_core::infra::monitor::amdgpu::AmdGpuMonitor;
 use weight_check_core::infra::monitor::host::SysinfoHostMonitor;
 use weight_check_core::infra::monitor::{GpuMonitor, HostMonitor};
+use weight_check_core::infra::sandbox::PythonRunner;
 use weight_check_core::repository::sqlite::SqliteStore;
 use weight_check_core::service::benchmark_service::BenchmarkService;
 use weight_check_core::service::benchmarks::Registry;
+use weight_check_core::service::benchmarks::quality::QualityDeps;
 use weight_check_core::service::model_service::ModelService;
 use weight_check_core::service::system_service::SystemService;
 
@@ -26,11 +29,19 @@ use commands::AppState;
 /// File name of the SQLite database inside the app data directory.
 pub const DB_FILE_NAME: &str = "weight-check.db";
 
+/// Directory inside the app data directory where eval datasets are cached.
+pub const DATASETS_DIR_NAME: &str = "datasets";
+
 const DEFAULT_LOG_FILTER: &str = "weight_check_lib=info,weight_check_core=info";
 
 /// Builds the services: store → monitors → services, and starts the idle watchdog.
+/// Eval datasets are cached under `datasets_dir` (created on first download).
 /// Must run inside a tokio runtime (the watchdog is a spawned task).
-pub async fn build_state(config: &Config, db_path: &Path) -> Result<AppState, AppError> {
+pub async fn build_state(
+    config: &Config,
+    db_path: &Path,
+    datasets_dir: &Path,
+) -> Result<AppState, AppError> {
     let store = Arc::new(SqliteStore::open(db_path).await?);
     tracing::info!(path = %db_path.display(), "database ready");
 
@@ -64,8 +75,12 @@ pub async fn build_state(config: &Config, db_path: &Path) -> Result<AppState, Ap
     ));
     models.spawn_idle_watchdog();
 
+    let quality = QualityDeps {
+        datasets: Arc::new(HttpDatasetStore::new(datasets_dir)),
+        code_runner: Arc::new(PythonRunner::new(config.python_bin.clone())),
+    };
     let benchmarks = Arc::new(BenchmarkService::new(
-        Registry::default(),
+        Registry::standard(quality),
         store,
         models.clone(),
         gpu,
@@ -92,7 +107,12 @@ pub async fn shutdown(state: &AppState) {
 async fn init(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
     std::fs::create_dir_all(data_dir)?;
-    Ok(build_state(&config, &data_dir.join(DB_FILE_NAME)).await?)
+    Ok(build_state(
+        &config,
+        &data_dir.join(DB_FILE_NAME),
+        &data_dir.join(DATASETS_DIR_NAME),
+    )
+    .await?)
 }
 
 fn init_tracing() {

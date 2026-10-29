@@ -2,12 +2,12 @@ use std::time::Duration;
 
 use super::*;
 use crate::domain::RunStatus;
-use crate::service::testing::{FakeHost, FakeSession, InMemoryRuns};
+use crate::service::testing::{FakeHost, FakeSession, InMemoryRuns, fake_quality_deps};
 
 fn service(session: FakeSession) -> (BenchmarkService, Arc<InMemoryRuns>) {
     let runs = Arc::new(InMemoryRuns::default());
     let service = BenchmarkService::new(
-        Registry::default(),
+        Registry::standard(fake_quality_deps()),
         runs.clone(),
         Arc::new(session),
         None,
@@ -91,7 +91,7 @@ async fn rejects_unknown_stub_and_invalid() {
         Err(AppError::NotFound(_))
     ));
     assert!(matches!(
-        service.start_run("quality.reasoning", None).await,
+        service.start_run("agentic.tool_calling", None).await,
         Err(AppError::NotImplemented(_))
     ));
     assert!(matches!(

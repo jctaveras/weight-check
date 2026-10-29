@@ -17,6 +17,7 @@ fn applies_defaults() {
     assert_eq!(c.models_dir, PathBuf::from("./models"));
     assert_eq!(c.idle_timeout, Some(Duration::from_secs(600)));
     assert_eq!(c.load_timeout, Duration::from_secs(300));
+    assert_eq!(c.python_bin, PathBuf::from("python3"));
 }
 
 #[test]
@@ -26,12 +27,14 @@ fn reads_overrides_and_zero_disables_watchdog() {
         ("MODELS_DIR", "/models"),
         ("IDLE_TIMEOUT_SECS", "0"),
         ("LLAMA_LOAD_TIMEOUT_SECS", "5"),
+        ("PYTHON_BIN", "/usr/bin/python3.12"),
     ])
     .unwrap();
     assert_eq!(c.llama_server_bin, PathBuf::from("/opt/llama-server"));
     assert_eq!(c.models_dir, PathBuf::from("/models"));
     assert_eq!(c.idle_timeout, None);
     assert_eq!(c.load_timeout, Duration::from_secs(5));
+    assert_eq!(c.python_bin, PathBuf::from("/usr/bin/python3.12"));
 }
 
 #[test]

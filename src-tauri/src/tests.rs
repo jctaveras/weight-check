@@ -8,6 +8,7 @@ fn config(models_dir: &Path) -> Config {
         models_dir: models_dir.to_path_buf(),
         idle_timeout: Some(Duration::from_secs(600)),
         load_timeout: Duration::from_secs(1),
+        python_bin: "python3".into(),
     }
 }
 
@@ -15,7 +16,13 @@ fn config(models_dir: &Path) -> Config {
 async fn build_state_wires_working_services() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join(DB_FILE_NAME);
-    let state = build_state(&config(dir.path()), &db).await.unwrap();
+    let state = build_state(
+        &config(dir.path()),
+        &db,
+        &dir.path().join(DATASETS_DIR_NAME),
+    )
+    .await
+    .unwrap();
     assert!(db.is_file());
 
     let health = commands::health(&state).await.unwrap();
@@ -37,9 +44,21 @@ async fn build_state_wires_working_services() {
 async fn build_state_reuses_an_existing_database() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join(DB_FILE_NAME);
-    let first = build_state(&config(dir.path()), &db).await.unwrap();
+    let first = build_state(
+        &config(dir.path()),
+        &db,
+        &dir.path().join(DATASETS_DIR_NAME),
+    )
+    .await
+    .unwrap();
     drop(first);
-    let second = build_state(&config(dir.path()), &db).await.unwrap();
+    let second = build_state(
+        &config(dir.path()),
+        &db,
+        &dir.path().join(DATASETS_DIR_NAME),
+    )
+    .await
+    .unwrap();
     commands::health(&second).await.unwrap();
 }
 
@@ -47,7 +66,14 @@ async fn build_state_reuses_an_existing_database() {
 async fn build_state_reports_an_unusable_database_path() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("missing-dir").join(DB_FILE_NAME);
-    let err = build_state(&config(dir.path()), &db).await.err().unwrap();
+    let err = build_state(
+        &config(dir.path()),
+        &db,
+        &dir.path().join(DATASETS_DIR_NAME),
+    )
+    .await
+    .err()
+    .unwrap();
     assert!(matches!(err, AppError::Database(_)), "{err}");
 }
 

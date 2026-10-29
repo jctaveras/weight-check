@@ -5,7 +5,10 @@ use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{CompletionRequest, CompletionResponse, LlamaApi, StreamedCompletion, Timings};
+use super::{
+    ChatRequest, ChatResponse, CompletionRequest, CompletionResponse, LlamaApi, StreamedCompletion,
+    Timings,
+};
 use crate::error::{AppError, AppResult};
 
 /// HTTP client for a llama-server instance.
@@ -44,6 +47,46 @@ struct StreamChunk {
     timings: Option<Timings>,
 }
 
+#[derive(Deserialize)]
+struct ChatCompletion {
+    choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: ChatUsage,
+}
+
+#[derive(Deserialize)]
+struct ChatChoice {
+    message: ChatChoiceMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ChatChoiceMessage {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct ChatUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+}
+
+/// Fails with the status and body when llama-server rejected the request.
+async fn check_status(resp: reqwest::Response, path: &str) -> AppResult<reqwest::Response> {
+    if resp.status().is_success() {
+        return Ok(resp);
+    }
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    Err(AppError::Llama(format!("{path} returned {status}: {text}")))
+}
+
 #[async_trait]
 impl LlamaApi for LlamaHttpClient {
     async fn health(&self) -> AppResult<bool> {
@@ -64,13 +107,7 @@ impl LlamaApi for LlamaHttpClient {
             .send()
             .await
             .map_err(llama_err)?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(AppError::Llama(format!(
-                "/completion returned {status}: {text}"
-            )));
-        }
+        let resp = check_status(resp, "/completion").await?;
         resp.json().await.map_err(llama_err)
     }
 
@@ -86,13 +123,7 @@ impl LlamaApi for LlamaHttpClient {
             .send()
             .await
             .map_err(llama_err)?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(AppError::Llama(format!(
-                "/completion returned {status}: {text}"
-            )));
-        }
+        let resp = check_status(resp, "/completion").await?;
 
         let mut out = StreamedCompletion::default();
         let mut buffer = String::new();
@@ -124,6 +155,30 @@ impl LlamaApi for LlamaHttpClient {
 
         out.total_ms = start.elapsed().as_secs_f64() * 1000.0;
         Ok(out)
+    }
+
+    async fn chat(&self, req: &ChatRequest) -> AppResult<ChatResponse> {
+        let resp = self
+            .http
+            .post(self.url("/v1/chat/completions"))
+            .json(req)
+            .send()
+            .await
+            .map_err(llama_err)?;
+        let resp = check_status(resp, "/v1/chat/completions").await?;
+        let body: ChatCompletion = resp.json().await.map_err(llama_err)?;
+        let choice = body
+            .choices
+            .into_iter()
+            .next()
+            .ok_or_else(|| AppError::Llama("chat completion returned no choices".into()))?;
+        Ok(ChatResponse {
+            content: choice.message.content.unwrap_or_default(),
+            reasoning_content: choice.message.reasoning_content.filter(|r| !r.is_empty()),
+            finish_reason: choice.finish_reason.unwrap_or_default(),
+            prompt_tokens: body.usage.prompt_tokens,
+            completion_tokens: body.usage.completion_tokens,
+        })
     }
 }
 

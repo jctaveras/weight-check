@@ -67,6 +67,11 @@ impl InMemoryRuns {
     }
 }
 
+/// Like the SQLite store, a finished run's status is final.
+fn unfinished(run: &Run) -> bool {
+    matches!(run.status, RunStatus::Queued | RunStatus::Running)
+}
+
 #[async_trait]
 impl RunRepository for InMemoryRuns {
     async fn create(&self, r: NewRun) -> AppResult<Run> {
@@ -93,26 +98,48 @@ impl RunRepository for InMemoryRuns {
 
     async fn mark_running(&self, id: Uuid) -> AppResult<()> {
         self.update(id, |run, _| {
-            run.status = RunStatus::Running;
-            run.started_at = Some(Utc::now());
+            if run.status == RunStatus::Queued {
+                run.status = RunStatus::Running;
+                run.started_at = Some(Utc::now());
+            }
         })
     }
 
     async fn complete(&self, id: Uuid, details: Value, m: &[Metric]) -> AppResult<()> {
         self.update(id, |run, metrics| {
-            run.status = RunStatus::Completed;
-            run.details = Some(details);
-            run.finished_at = Some(Utc::now());
-            *metrics = m.to_vec();
+            if unfinished(run) {
+                run.status = RunStatus::Completed;
+                run.details = Some(details);
+                run.finished_at = Some(Utc::now());
+                *metrics = m.to_vec();
+            }
         })
     }
 
     async fn fail(&self, id: Uuid, error: &str) -> AppResult<()> {
         self.update(id, |run, _| {
-            run.status = RunStatus::Failed;
-            run.error = Some(error.to_string());
-            run.finished_at = Some(Utc::now());
+            if unfinished(run) {
+                run.status = RunStatus::Failed;
+                run.error = Some(error.to_string());
+                run.finished_at = Some(Utc::now());
+            }
         })
+    }
+
+    async fn cancel(&self, id: Uuid) -> AppResult<bool> {
+        let mut cancelled = false;
+        self.update(id, |run, _| {
+            if unfinished(run) {
+                run.status = RunStatus::Cancelled;
+                run.finished_at = Some(Utc::now());
+                cancelled = true;
+            }
+        })?;
+        Ok(cancelled)
+    }
+
+    async fn delete(&self, id: Uuid) -> AppResult<bool> {
+        Ok(self.runs.lock().unwrap().remove(&id).is_some())
     }
 
     async fn get(&self, id: Uuid) -> AppResult<Option<Run>> {
@@ -149,6 +176,8 @@ pub struct FakeLlama {
 
 impl FakeLlama {
     async fn simulate(&self) -> AppResult<()> {
+        // Like real network I/O, always yield, so `select!` (run cancellation) gets a turn.
+        tokio::task::yield_now().await;
         if let Some(d) = self.delay {
             tokio::time::sleep(d).await;
         }

@@ -122,6 +122,30 @@ fn run_commands_take_request_filter_and_id() {
 }
 
 #[test]
+fn cancel_and_delete_take_an_id() {
+    let ipc = ipc(true);
+    let request = json!({"request": {"benchmark_id": "inference.latency", "config": {"repetitions": 100000}}});
+    let run = ipc.invoke("start_run", request).unwrap();
+    let args = json!({"id": run["id"]});
+
+    let err = ipc.invoke("delete_run", args.clone()).unwrap_err();
+    assert_eq!(err["code"], "busy");
+    let cancelled = ipc.invoke("cancel_run", args.clone()).unwrap();
+    assert_eq!(cancelled["id"], run["id"]);
+    for _ in 0..500 {
+        if ipc.invoke("get_run", args.clone()).unwrap()["status"] == "cancelled" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(ipc.invoke("delete_run", args.clone()).unwrap(), Value::Null);
+    let err = ipc.invoke("get_run", args.clone()).unwrap_err();
+    assert_eq!(err["code"], "not_found");
+    let err = ipc.invoke("cancel_run", json!({"id": "nope"})).unwrap_err();
+    assert_eq!(err["code"], "validation");
+}
+
+#[test]
 fn compare_runs_takes_ids() {
     let ipc = ipc(true);
     let request =

@@ -7,6 +7,7 @@ const STATUS: Record<RunStatus, { label: string; tone: Tone }> = {
   running: { label: "Running", tone: "info" },
   completed: { label: "Completed", tone: "success" },
   failed: { label: "Failed", tone: "danger" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
 };
 
 export function RunStatusBadge({ status }: { status: RunStatus }) {

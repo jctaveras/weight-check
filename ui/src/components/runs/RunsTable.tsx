@@ -4,14 +4,18 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import type { Run } from "@/lib/api/types";
 import { elapsedMs, formatDateTime, formatDuration, shortId } from "@/lib/format";
 import { useLookups } from "@/lib/queries/useLookups";
+import { isActive } from "@/lib/queries/useRuns";
+import { DeleteRunButton } from "./DeleteRunButton";
 import { RunStatusBadge } from "./RunStatusBadge";
 
 interface RunsTableProps {
   runs: Run[];
   caption?: string;
+  /** Adds a Delete Run action to finished rows. */
+  deletable?: boolean;
 }
 
-export function RunsTable({ runs, caption = "Benchmark runs" }: RunsTableProps) {
+export function RunsTable({ runs, caption = "Benchmark runs", deletable = false }: RunsTableProps) {
   const { benchmarkName, modelName } = useLookups();
 
   const columns: Column<Run>[] = [
@@ -56,6 +60,14 @@ export function RunsTable({ runs, caption = "Benchmark runs" }: RunsTableProps) 
       cell: (r) => formatDuration(elapsedMs(r.started_at, r.finished_at)),
     },
   ];
+  if (deletable) {
+    columns.push({
+      key: "actions",
+      header: <span className="sr-only">Actions</span>,
+      // Active runs are cancelled from their detail page.
+      cell: (r) => (isActive(r.status) ? null : <DeleteRunButton runId={r.id} />),
+    });
+  }
 
   return <DataTable caption={caption} columns={columns} rows={runs} rowKey={(r) => r.id} />;
 }

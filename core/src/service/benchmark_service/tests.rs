@@ -1,8 +1,10 @@
 use std::time::Duration;
 
 use super::*;
+use crate::domain::NewRun;
 use crate::domain::RunStatus;
-use crate::service::testing::{FakeHost, FakeSession, InMemoryRuns};
+use crate::repository::RunRepository;
+use crate::service::testing::{FakeHost, FakeLlama, FakeSession, InMemoryRuns};
 
 fn service(session: FakeSession) -> (BenchmarkService, Arc<InMemoryRuns>) {
     let runs = Arc::new(InMemoryRuns::default());
@@ -21,7 +23,10 @@ async fn wait_finished(service: &BenchmarkService, id: Uuid) -> RunWithMetrics {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let run = service.get_run(id).await.unwrap();
-            if matches!(run.run.status, RunStatus::Completed | RunStatus::Failed) {
+            if matches!(
+                run.run.status,
+                RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+            ) {
                 return run;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -134,6 +139,96 @@ async fn failed_benchmark_is_recorded() {
     assert_eq!(done.run.status, RunStatus::Failed);
     assert!(done.run.error.unwrap().contains("boom"));
     assert!(done.metrics.is_empty());
+}
+
+/// A session whose every request takes a second, so runs are reliably mid-flight.
+fn very_slow() -> FakeSession {
+    FakeSession::with(Some(FakeLlama {
+        delay: Some(Duration::from_secs(1)),
+        fail: false,
+    }))
+}
+
+#[tokio::test]
+async fn cancel_stops_a_running_benchmark_and_frees_the_gate() {
+    let (service, _) = service(very_slow());
+    let run = service.start_run("inference.latency", None).await.unwrap();
+
+    let returned = service.cancel_run(run.id).await.unwrap();
+    assert_eq!(returned.id, run.id);
+    let done = wait_finished(&service, run.id).await;
+    assert_eq!(done.run.status, RunStatus::Cancelled);
+    assert!(done.run.finished_at.is_some());
+    assert!(done.metrics.is_empty() && done.run.error.is_none());
+
+    // The gate is free as soon as the final status is visible.
+    let next = service.start_run("inference.latency", None).await.unwrap();
+    service.cancel_run(next.id).await.unwrap();
+    // Asking twice while it winds down is harmless.
+    service.cancel_run(next.id).await.unwrap();
+    assert_eq!(
+        wait_finished(&service, next.id).await.run.status,
+        RunStatus::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn cancel_rejects_finished_and_unknown_runs() {
+    let (service, _) = service(FakeSession::loaded());
+    let run = service.start_run("inference.latency", None).await.unwrap();
+    wait_finished(&service, run.id).await;
+    assert!(matches!(
+        service.cancel_run(run.id).await,
+        Err(AppError::Validation(ref m)) if m.contains("completed")
+    ));
+    assert!(matches!(
+        service.cancel_run(Uuid::new_v4()).await,
+        Err(AppError::NotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn cancel_marks_a_run_orphaned_by_a_crash() {
+    let (service, runs) = service(FakeSession::loaded());
+    // A run left `running` by a previous app session has no task behind it.
+    let run = runs
+        .create(NewRun {
+            model_id: Uuid::new_v4(),
+            hardware_id: Uuid::new_v4(),
+            category: crate::domain::Category::InferencePerformance,
+            benchmark_name: "inference.latency".into(),
+            config: json!({}),
+        })
+        .await
+        .unwrap();
+    runs.mark_running(run.id).await.unwrap();
+    service.cancel_run(run.id).await.unwrap();
+    assert_eq!(
+        service.get_run(run.id).await.unwrap().run.status,
+        RunStatus::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn delete_removes_finished_runs_but_not_the_active_one() {
+    let (service, _) = service(very_slow());
+    let run = service.start_run("inference.latency", None).await.unwrap();
+    assert!(matches!(
+        service.delete_run(run.id).await,
+        Err(AppError::Busy(_))
+    ));
+
+    service.cancel_run(run.id).await.unwrap();
+    wait_finished(&service, run.id).await;
+    service.delete_run(run.id).await.unwrap();
+    assert!(matches!(
+        service.get_run(run.id).await,
+        Err(AppError::NotFound(_))
+    ));
+    assert!(matches!(
+        service.delete_run(run.id).await,
+        Err(AppError::NotFound(_))
+    ));
 }
 
 #[tokio::test]

@@ -10,7 +10,7 @@ export type Category =
   | "agentic"
   | "context_scalability";
 
-export type RunStatus = "queued" | "running" | "completed" | "failed";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export type ErrorCode =
   | "not_found"

@@ -79,6 +79,9 @@ The UI talks to the core through Tauri commands (`invoke(name, args)`). Each ret
 | `list_runs` | `filter?: {model_id?, category?, benchmark?, limit?}` | runs, newest first |
 | `start_run` | `request: {benchmark_id, config?}` | the queued run |
 | `get_run` | `id: "<uuid>"` | the run with its metrics |
+| `cancel_run` | `id: "<uuid>"` | the run (it turns `cancelled` once it has stopped) |
+| `delete_run` | `id: "<uuid>"` | `null` (the run and its metrics are deleted) |
+| `compare_runs` | `ids: ["<uuid>", …]` | completed runs of one benchmark, with metrics |
 
 Errors reject with `{"code", "message"}`:
 
@@ -86,13 +89,17 @@ Errors reject with `{"code", "message"}`:
 |---|---|
 | Not found | `not_found` |
 | No model loaded | `no_model_loaded` |
-| Model busy with a run | `busy` |
+| Model busy with a run, or deleting the active run | `busy` |
 | Invalid payload | `validation` |
 | Benchmark not implemented yet | `not_implemented` |
 | llama-server failure | `llama_server` |
 | Database or internal failure | `internal` |
 
 Only one benchmark runs at a time. While a run is active, the model cannot be unloaded and the idle watchdog does not unload it.
+
+Runs go `queued` → `running` → `completed`, `failed` or `cancelled`, and a finished run's status never changes:
+- Cancelling stops in-flight llama-server requests.
+- Only finished runs can be deleted. Cancel an active run first.
 
 ## Configuration
 

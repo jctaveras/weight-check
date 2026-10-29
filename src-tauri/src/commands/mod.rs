@@ -92,6 +92,18 @@ pub async fn get_run(state: &AppState, id: &str) -> CommandResult<RunWithMetrics
     Ok(state.benchmarks.get_run(id).await?)
 }
 
+/// Asks a queued or running run to stop; it becomes `cancelled` shortly after.
+pub async fn cancel_run(state: &AppState, id: &str) -> CommandResult<Run> {
+    let id = dto::parse_run_id(id)?;
+    Ok(state.benchmarks.cancel_run(id).await?)
+}
+
+/// Deletes a finished run and its metrics.
+pub async fn delete_run(state: &AppState, id: &str) -> CommandResult<()> {
+    let id = dto::parse_run_id(id)?;
+    Ok(state.benchmarks.delete_run(id).await?)
+}
+
 /// Completed runs of one benchmark, with metrics, for the Compare page.
 pub async fn compare_runs(state: &AppState, ids: &[String]) -> CommandResult<Vec<RunWithMetrics>> {
     let ids = dto::parse_run_ids(ids)?;

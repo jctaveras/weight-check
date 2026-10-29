@@ -29,7 +29,8 @@ cargo cov-html                               # HTML report in target/llvm-cov/ht
 - Coverage aliases cover the whole workspace and exclude `src-tauri/src/main.rs`, `service/testing.rs` and unit test files (`**/tests.rs`). `repository/sqlite.rs` is covered by the integration tests.
 - The SQLite integration test (`core/tests/sqlite.rs`) always runs: each test opens a fresh database file in a `tempfile` dir via `SqliteStore::connect`/`open`, which apply the migrations.
 - The database is an embedded SQLite file, `weight-check.db` in the OS app data directory (`app.path().app_data_dir()`, e.g. `~/.local/share/dev.weightcheck.app/` on Linux), created if missing and opened with foreign keys on and WAL journaling.
-- Migrations in `core/migrations/` are applied automatically at startup via `sqlx::migrate!` (inside `SqliteStore::connect`/`open`). Schema changes go in new numbered files; don't edit `0001_init.sql`.
+- Migrations in `core/migrations/` are applied automatically at startup via `sqlx::migrate!` (inside `SqliteStore::connect`/`open`). Schema changes go in new numbered files; never edit an applied one.
+- `0002_run_cancelled_status.sql` rebuilds `benchmark_runs` and `metrics` to allow the `cancelled` status. Changing a CHECK constraint means rebuilding the table, and the child table must be rebuilt first: dropping a parent that still has `ON DELETE CASCADE` children deletes their rows.
 
 ## Architecture
 
@@ -74,7 +75,14 @@ The Rust code uses a strict layered architecture. Respect the boundaries:
   2. Take the single-run semaphore and a model checkout.
   3. Insert the run as `queued`.
   4. Execute it in a spawned task, which moves it to `running` and then `completed` or `failed`.
-  5. Keep the permit and guard alive until the task finishes.
+  5. Keep the permit and guard alive until the benchmark future ends.
+- `cancel_run(id)` signals the active run's task through a `oneshot`.
+  - The task `select!`s the benchmark against it and drops the benchmark future on cancel. Dropping aborts reqwest calls; child processes use `kill_on_drop`; spawned helpers need a drop guard, like `resource::StopOnDrop`.
+  - The task then frees the gate, the guard and the `active` slot before it stores the final status, so a client that sees the final status can start the next run straight away.
+  - An unfinished run with no task behind it (a repeated cancel, or a run orphaned by a crash) is marked `cancelled` directly.
+- `delete_run` refuses the active run (`Busy`).
+- Final statuses (`completed`, `failed`, `cancelled`) are never overwritten. The SQLite `mark_running`/`complete`/`fail`/`cancel` updates are guarded by status (`UNFINISHED`), and `InMemoryRuns` mirrors this.
+- `FakeLlama` yields on every request, as real I/O does, so cancellation works in tests.
 - Requests go through `completion_request()` (temperature 0, `cache_prompt: false`, `ignore_eos: true`), so runs are deterministic and comparable.
 
 ### Storage model

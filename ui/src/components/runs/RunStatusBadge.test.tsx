@@ -9,6 +9,7 @@ describe("RunStatusBadge", () => {
     ["running", "Running"],
     ["completed", "Completed"],
     ["failed", "Failed"],
+    ["cancelled", "Cancelled"],
   ] as const)("labels %s as %s", (status, label) => {
     render(<RunStatusBadge status={status} />);
     expect(screen.getByText(label)).toBeInTheDocument();

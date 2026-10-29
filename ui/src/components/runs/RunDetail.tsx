@@ -1,6 +1,7 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
 import { LoadingText } from "@/components/ui/LoadingText";
@@ -8,7 +9,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { elapsedMs, formatDateTime, formatDuration } from "@/lib/format";
 import { useLookups } from "@/lib/queries/useLookups";
 import { useRun } from "@/lib/queries/useRun";
+import { useCancelRun } from "@/lib/queries/useCancelRun";
 import { isActive } from "@/lib/queries/useRuns";
+import { DeleteRunButton } from "./DeleteRunButton";
 import { JsonViewer } from "./JsonViewer";
 import { MetricsTable } from "./MetricsTable";
 import { RunStatusBadge } from "./RunStatusBadge";
@@ -25,6 +28,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 export function RunDetail({ id }: { id: string }) {
   const { data: run, error, isPending } = useRun(id);
   const { benchmarkName, categoryTitle, modelName } = useLookups();
+  const cancel = useCancelRun();
+  const navigate = useNavigate();
 
   if (isPending) return <LoadingText>Loading run…</LoadingText>;
   if (error && !run) return <ErrorMessage error={error} title="Couldn't load this run" />;
@@ -61,6 +66,19 @@ export function RunDetail({ id }: { id: string }) {
                 Compare With Other Runs
               </Link>
             )}
+            {active ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                // Stays disabled after a successful request until the run reports `cancelled`.
+                loading={cancel.isPending || cancel.isSuccess}
+                onClick={() => cancel.mutate(run.id)}
+              >
+                {cancel.isPending || cancel.isSuccess ? "Cancelling…" : "Cancel Run"}
+              </Button>
+            ) : (
+              <DeleteRunButton runId={run.id} onDeleted={() => navigate({ to: "/runs" })} />
+            )}
           </>
         }
       />
@@ -88,6 +106,11 @@ export function RunDetail({ id }: { id: string }) {
             <LoadingText>
               {run.status === "queued" ? "Waiting to start…" : "Benchmark running; results appear when it finishes…"}
             </LoadingText>
+          </div>
+        )}
+        {cancel.error && (
+          <div className="mt-4">
+            <ErrorMessage error={cancel.error} title="Couldn't cancel this run" />
           </div>
         )}
         {run.error && (

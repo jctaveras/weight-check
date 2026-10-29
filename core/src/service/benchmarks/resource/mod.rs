@@ -85,14 +85,14 @@ impl Benchmark for ResourceProfile {
         let config: Config = parse_config(config)?;
 
         let idle = Arc::new(AtomicBool::new(true));
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop = StopOnDrop(Arc::new(AtomicBool::new(false)));
         let sampler = tokio::spawn(sample_loop(
             ctx.gpu.clone(),
             ctx.host.clone(),
             ctx.model.pid,
             Duration::from_millis(config.sample_interval_ms),
             idle.clone(),
-            stop.clone(),
+            stop.0.clone(),
         ));
 
         tokio::time::sleep(Duration::from_millis(config.idle_ms)).await;
@@ -115,7 +115,7 @@ impl Benchmark for ResourceProfile {
             }
         }
         let workload_s = workload_started.elapsed().as_secs_f64();
-        stop.store(true, Ordering::SeqCst);
+        drop(stop);
         let samples = sampler
             .await
             .map_err(|e| AppError::Internal(format!("sampler task failed: {e}")))?;
@@ -139,6 +139,15 @@ impl Benchmark for ResourceProfile {
                 "samples": samples,
             }),
         })
+    }
+}
+
+/// Stops the sampler when dropped, including when a cancelled run drops `run` mid-workload.
+struct StopOnDrop(Arc<AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
     }
 }
 

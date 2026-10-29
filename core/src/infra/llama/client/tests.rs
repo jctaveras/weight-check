@@ -7,6 +7,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::Value;
 
+use crate::infra::llama::ChatMessage;
+
 use super::*;
 
 const SSE: &str = concat!(
@@ -32,21 +34,52 @@ async fn completion(Json(body): Json<Value>) -> Response {
             .collect();
         Body::from_stream(futures::stream::iter(chunks)).into_response()
     } else {
-        Json(json!({
+        let probs = if body["n_probs"] == 2 {
+            json!([{"id": 1, "token": " B", "logprob": -0.1, "bytes": [32, 66],
+            "top_logprobs": [
+                {"id": 1, "token": " B", "logprob": -0.1, "bytes": [32, 66]},
+                {"id": 2, "token": " A", "logprob": -2.5, "bytes": [32, 65]}
+            ]}])
+        } else {
+            json!(null)
+        };
+        let mut resp = json!({
             "content": "hi",
             "tokens_predicted": 3,
             "tokens_evaluated": 5,
             "timings": {"predicted_n": 3, "predicted_per_second": 30.0},
             "extra_field": true,
-        }))
-        .into_response()
+        });
+        if !probs.is_null() {
+            resp["completion_probabilities"] = probs;
+        }
+        Json(resp).into_response()
     }
+}
+
+async fn chat(Json(body): Json<Value>) -> Response {
+    // Echo the request back so tests can assert on what was sent.
+    let thinking = body["chat_template_kwargs"]["enable_thinking"] != false;
+    Json(json!({
+        "choices": [{
+            "index": 0,
+            "finish_reason": if body["max_tokens"] == 1 { "length" } else { "stop" },
+            "message": {
+                "role": "assistant",
+                "content": body["messages"][0]["content"],
+                "reasoning_content": if thinking { "hmm" } else { "" },
+            }
+        }],
+        "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+    }))
+    .into_response()
 }
 
 fn healthy() -> Router {
     Router::new()
         .route("/health", get(|| async { StatusCode::OK }))
         .route("/completion", post(completion))
+        .route("/v1/chat/completions", post(chat))
 }
 
 fn failing() -> Router {
@@ -54,6 +87,10 @@ fn failing() -> Router {
         .route("/health", get(|| async { StatusCode::SERVICE_UNAVAILABLE }))
         .route(
             "/completion",
+            post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "kaboom") }),
+        )
+        .route(
+            "/v1/chat/completions",
             post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "kaboom") }),
         )
 }
@@ -73,6 +110,17 @@ fn request(prompt: &str) -> CompletionRequest {
         seed: 0,
         cache_prompt: false,
         ignore_eos: true,
+        n_probs: None,
+    }
+}
+
+fn chat_request(content: &str, max_tokens: u32, thinking: bool) -> ChatRequest {
+    ChatRequest {
+        messages: vec![ChatMessage::user(content)],
+        max_tokens,
+        temperature: 0.0,
+        seed: 0,
+        chat_template_kwargs: (!thinking).then(|| json!({"enable_thinking": false})),
     }
 }
 
@@ -101,6 +149,36 @@ async fn completion_parses_response() {
     assert_eq!(resp.tokens_predicted, 3);
     assert_eq!(resp.timings.predicted_per_second, 30.0);
     assert_eq!(resp.timings.prompt_ms, 0.0);
+    assert!(resp.probs.is_empty());
+}
+
+#[tokio::test]
+async fn completion_parses_token_probabilities() {
+    let mut req = request("x");
+    req.n_probs = Some(2);
+    let resp = serve(healthy()).await.completion(&req).await.unwrap();
+    assert_eq!(resp.probs.len(), 1);
+    assert_eq!(resp.probs[0].token, " B");
+    let top: Vec<_> = resp.probs[0]
+        .top_logprobs
+        .iter()
+        .map(|p| (p.token.as_str(), p.logprob))
+        .collect();
+    assert_eq!(top, [(" B", -0.1), (" A", -2.5)]);
+}
+
+#[tokio::test]
+async fn chat_parses_content_reasoning_and_usage() {
+    let client = serve(healthy()).await;
+    let resp = client.chat(&chat_request("hello", 64, true)).await.unwrap();
+    assert_eq!(resp.content, "hello");
+    assert_eq!(resp.reasoning_content.as_deref(), Some("hmm"));
+    assert_eq!(resp.finish_reason, "stop");
+    assert_eq!((resp.prompt_tokens, resp.completion_tokens), (7, 3));
+
+    let resp = client.chat(&chat_request("hi", 1, false)).await.unwrap();
+    assert_eq!(resp.reasoning_content, None);
+    assert_eq!(resp.finish_reason, "length");
 }
 
 #[tokio::test]
@@ -109,6 +187,7 @@ async fn non_success_status_is_a_llama_error() {
     for result in [
         client.completion(&request("x")).await.map(|_| ()),
         client.completion_stream(&request("x")).await.map(|_| ()),
+        client.chat(&chat_request("x", 8, true)).await.map(|_| ()),
     ] {
         match result {
             Err(AppError::Llama(msg)) => {

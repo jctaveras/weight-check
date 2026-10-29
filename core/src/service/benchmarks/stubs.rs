@@ -1,4 +1,4 @@
-//! Placeholders for categories 3–5 so the catalog already lists every category.
+//! Placeholders for categories 4–5 so the catalog already lists every category.
 
 use std::sync::Arc;
 
@@ -18,12 +18,6 @@ pub struct Planned {
 
 pub fn all() -> Vec<Arc<dyn Benchmark>> {
     vec![
-        Arc::new(Planned {
-            id: "quality.reasoning",
-            category: Category::ModelQuality,
-            name: "Reasoning & knowledge",
-            description: "Reasoning, coding, factual accuracy, instruction following and language tasks",
-        }),
         Arc::new(Planned {
             id: "agentic.tool_calling",
             category: Category::Agentic,

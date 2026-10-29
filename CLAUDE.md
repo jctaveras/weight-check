@@ -29,7 +29,8 @@ cargo cov-html                               # HTML report in target/llvm-cov/ht
 - Coverage aliases cover the whole workspace and exclude `src-tauri/src/main.rs`, `service/testing.rs` and unit test files (`**/tests.rs`). `repository/sqlite.rs` is covered by the integration tests.
 - The SQLite integration test (`core/tests/sqlite.rs`) always runs: each test opens a fresh database file in a `tempfile` dir via `SqliteStore::connect`/`open`, which apply the migrations.
 - The database is an embedded SQLite file, `weight-check.db` in the OS app data directory (`app.path().app_data_dir()`, e.g. `~/.local/share/dev.weightcheck.app/` on Linux), created if missing and opened with foreign keys on and WAL journaling.
-- Migrations in `core/migrations/` are applied automatically at startup via `sqlx::migrate!` (inside `SqliteStore::connect`/`open`). Schema changes go in new numbered files; don't edit `0001_init.sql`.
+- Migrations in `core/migrations/` are applied automatically at startup via `sqlx::migrate!` (inside `SqliteStore::connect`/`open`). Schema changes go in new numbered files; never edit an applied one.
+- `0002_run_cancelled_status.sql` rebuilds `benchmark_runs` and `metrics` to allow the `cancelled` status. Changing a CHECK constraint means rebuilding the table, and the child table must be rebuilt first: dropping a parent that still has `ON DELETE CASCADE` children deletes their rows.
 
 ## Architecture
 
@@ -46,11 +47,13 @@ The Rust code uses a strict layered architecture. Respect the boundaries:
   - Queries are runtime-checked (`query_as`), not `query!` macros, so builds don't need a live DB.
   - SQLite has no enum, UUID, timestamp or JSON types. Category and status are TEXT columns guarded by `CHECK (... IN (...))`; UUIDs are bound and read as hyphenated TEXT (`uuid::fmt::Hyphenated`); timestamps are bound from Rust (`Utc::now()`, never SQL `now()`) as RFC 3339 TEXT; JSON goes through `sqlx::types::Json`. Placeholders are `?N`. The `domain` types stay free of sqlx.
 - **`core/src/infra/`** holds the adapters the services use:
-  - `llama/`: the `ServerLauncher`, `RunningServer` and `LlamaApi` traits, plus the real llama-server process and HTTP client.
+  - `llama/`: the `ServerLauncher`, `RunningServer` and `LlamaApi` traits, plus the real llama-server process and HTTP client (`/completion`, optionally with `n_probs`, and `/v1/chat/completions`).
   - `monitor/`: `GpuMonitor` (AMD via amdgpu sysfs; this is where NVML would be added) and `HostMonitor` (sysinfo).
   - `gguf.rs`: header metadata reader.
-- **`core/src/domain/`** contains plain shared types. **`core/src/error.rs`** contains the single `AppError` used by every layer. **`core/src/config.rs`** reads `LLAMA_SERVER_BIN`, `MODELS_DIR`, `IDLE_TIMEOUT_SECS` and `LLAMA_LOAD_TIMEOUT_SECS` from the process env (temporary; Phase 4 replaces it with in-app settings).
-- **Wiring** happens in `src-tauri/src/lib.rs`: `run()` builds the Tauri app; its `setup` hook `block_on`s `init()` (config → `build_state`: `SqliteStore::open` (pool + migrations) → monitors → services → `spawn_idle_watchdog()`) and `app.manage(AppState { models, benchmarks, system })`. On `RunEvent::Exit` it calls `shutdown()`, which stops any loaded llama-server (even mid-run) so it never outlives the app. `main.rs` only calls `weight_check_lib::run()`.
+  - `datasets.rs`: `DatasetStore` (`HttpDatasetStore` downloads a pinned Hugging Face file, checks its sha256 and caches it under `<app data>/datasets/<repo>/<revision>/<path>`), plus `read_parquet`/`read_jsonl`.
+  - `sandbox.rs`: `CodeRunner` (`PythonRunner`: `python3 -I` in a fresh temp dir with an empty env and a timeout). It isolates runs from each other but is not a security sandbox.
+- **`core/src/domain/`** contains plain shared types. **`core/src/error.rs`** contains the single `AppError` used by every layer. **`core/src/config.rs`** reads `LLAMA_SERVER_BIN`, `MODELS_DIR`, `IDLE_TIMEOUT_SECS`, `LLAMA_LOAD_TIMEOUT_SECS` and `PYTHON_BIN` from the process env (temporary; Phase 4 replaces it with in-app settings).
+- **Wiring** happens in `src-tauri/src/lib.rs`: `run()` builds the Tauri app; its `setup` hook `block_on`s `init()` (config → `build_state(config, db_path, datasets_dir)`: `SqliteStore::open` (pool + migrations) → monitors → services → `spawn_idle_watchdog()`) and `app.manage(AppState { models, benchmarks, system })`. On `RunEvent::Exit` it calls `shutdown()`, which stops any loaded llama-server (even mid-run) so it never outlives the app. `main.rs` only calls `weight_check_lib::run()`.
 
 ### Model lifecycle (`core/src/service/model_service.rs`)
 
@@ -67,15 +70,36 @@ The Rust code uses a strict layered architecture. Respect the boundaries:
   - `descriptor()` returns the id, category, `implemented` flag and default config.
   - `resolve_config()` validates input and fills in defaults, usually via `resolve_config::<Config>()` with a `#[serde(default, deny_unknown_fields)]` struct.
   - `run()` returns a `BenchmarkOutcome { metrics, details }`.
-- Register new benchmarks in `Registry::default()`.
-- The five categories come from `domain::Category`. Categories 3–5 are currently `stubs.rs` placeholders that return `NotImplemented` (error code `not_implemented`).
+- Register new benchmarks in `Registry::standard()`. It takes `QualityDeps { datasets, code_runner }`, which the quality benchmarks hold; tests pass `fake_quality_deps()`.
+- The five categories come from `domain::Category`. Categories 4–5 are currently `stubs.rs` placeholders that return `NotImplemented` (error code `not_implemented`).
 - `BenchmarkService::start_run` handles each run:
   1. Validate the request.
   2. Take the single-run semaphore and a model checkout.
   3. Insert the run as `queued`.
   4. Execute it in a spawned task, which moves it to `running` and then `completed` or `failed`.
-  5. Keep the permit and guard alive until the task finishes.
+  5. Keep the permit and guard alive until the benchmark future ends.
+- `cancel_run(id)` signals the active run's task through a `oneshot`.
+  - The task `select!`s the benchmark against it and drops the benchmark future on cancel. Dropping aborts reqwest calls; child processes use `kill_on_drop`; spawned helpers need a drop guard, like `resource::StopOnDrop`.
+  - The task then frees the gate, the guard and the `active` slot before it stores the final status, so a client that sees the final status can start the next run straight away.
+  - An unfinished run with no task behind it (a repeated cancel, or a run orphaned by a crash) is marked `cancelled` directly.
+- `delete_run` refuses the active run (`Busy`).
+- Final statuses (`completed`, `failed`, `cancelled`) are never overwritten. The SQLite `mark_running`/`complete`/`fail`/`cancel` updates are guarded by status (`UNFINISHED`), and `InMemoryRuns` mirrors this.
+- `FakeLlama` yields on every request, as real I/O does, so cancellation works in tests.
 - Requests go through `completion_request()` (temperature 0, `cache_prompt: false`, `ignore_eos: true`), so runs are deterministic and comparable.
+
+### Quality benchmarks (`core/src/service/benchmarks/quality/`)
+
+- There are four benchmarks: `quality.knowledge` (MMLU or ARC-Challenge), `quality.math` (GSM8K), `quality.instruction_following` (IFEval) and `quality.coding` (HumanEval or LiveCodeBench v6).
+- **Datasets** are pinned in `sources.rs` by revision and sha256, and loaded with `load_rows`, which picks the reader by file extension.
+  - Bumping a pin changes what a benchmark measures, so runs before and after the bump are not comparable.
+- **Item selection** is deterministic. `sample`/`sample_stratified` use a seeded SplitMix64 shuffle (pinned by a test) and return items in dataset order.
+- **Requests:**
+  - `knowledge` scores the answer-letter log-probabilities from a raw `/completion` (`n_predict: 1`, `n_probs: 20`).
+  - The other three use chat (`chat_request`, temperature 0, optional `enable_thinking: false`).
+  - A `finish_reason` of `length` counts as invalid.
+  - Requests fan out through `eval_all`, capped at the server's `parallel` slots.
+- **IFEval checks** (`ifeval/checks.rs`) are ported from Google's reference implementation. Words and sentences are split by regex rather than NLTK, and `language:response_language` is skipped and reported in `details.skipped_instructions`.
+- **LiveCodeBench** private tests are base64(zlib(pickled str)). `pickled_str` reads the string's bytes directly and never unpickles.
 
 ### Storage model
 
@@ -98,6 +122,7 @@ The tests file is still a child module, so `use super::*;` reaches private items
 ### Test fakes
 
 `core/src/service/testing.rs` provides in-memory repositories (`InMemoryModels`, `InMemoryRuns`, `InMemoryHardware`), `FakeLlama` (fixed 50 tok/s), `FakeSession`, `FakeHost`, `FakeGpu`, `FakeHealth`, `FakeLauncher` and `gguf_bytes` (a minimal valid GGUF header). Reuse these when testing services.
+- For quality benchmarks it adds `ScriptedLlama` (answers computed per request; records `chat_requests` and `prompts`), `FakeDatasetStore` (`put(file, rows)` writes JSONL fixtures), `FakeCodeRunner` and `fake_quality_deps()`. `FakeSession::with_api(...)` wraps any `LlamaApi`, and `.context()` builds a `BenchmarkContext`.
 - It is compiled for core's own tests and behind core's `testing` feature (`#[cfg(any(test, feature = "testing"))]`, likewise `ActivityGuardFactory`). `src-tauri` enables the feature only in `[dev-dependencies]`, so release builds never include the fakes.
 
 Other test setups:

@@ -12,7 +12,7 @@ use weight_check_core::repository::ModelRepository;
 use weight_check_core::service::benchmarks::Registry;
 use weight_check_core::service::testing::{
     FakeGpu, FakeHealth, FakeHost, FakeLauncher, FakeSession, InMemoryHardware, InMemoryModels,
-    InMemoryRuns, gguf_bytes,
+    InMemoryRuns, fake_quality_deps, gguf_bytes,
 };
 
 pub(super) struct TestApp {
@@ -49,7 +49,7 @@ pub(super) async fn app(healthy: bool) -> TestApp {
             None,
         )),
         benchmarks: Arc::new(BenchmarkService::new(
-            Registry::default(),
+            Registry::standard(fake_quality_deps()),
             Arc::new(InMemoryRuns::default()),
             Arc::new(FakeSession::loaded()),
             None,
@@ -175,7 +175,7 @@ async fn runs_map_errors() {
     let app = app(true).await;
     let start = |body: Value| start_run(&app.state, body);
     assert_eq!(
-        code(start(json!({"benchmark_id": "quality.reasoning"})).await),
+        code(start(json!({"benchmark_id": "agentic.tool_calling"})).await),
         "not_implemented"
     );
     assert_eq!(
@@ -214,6 +214,45 @@ async fn completed_run(app: &TestApp) -> String {
     panic!("run {id} did not complete");
 }
 
+/// Waits until run `id` has the given status.
+async fn wait_status(app: &TestApp, id: &str, status: &str) {
+    for _ in 0..500 {
+        if ipc(get_run(&app.state, id).await).unwrap()["status"] == status {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("run {id} never became {status}");
+}
+
+#[tokio::test]
+async fn cancel_and_delete_runs() {
+    let app = app(true).await;
+    // Long enough to still be running when cancelled.
+    let request = json!({"benchmark_id": "inference.latency", "config": {"repetitions": 100000}});
+    let run = ipc(start_run(&app.state, request).await).unwrap();
+    let id = run["id"].as_str().unwrap();
+
+    assert_eq!(code(delete_run(&app.state, id).await), "busy");
+    let body = ipc(cancel_run(&app.state, id).await).unwrap();
+    assert_eq!(body["id"], id);
+    wait_status(&app, id, "cancelled").await;
+    assert_eq!(code(cancel_run(&app.state, id).await), "validation");
+
+    assert_eq!(ipc(delete_run(&app.state, id).await).unwrap(), Value::Null);
+    assert_eq!(code(get_run(&app.state, id).await), "not_found");
+    assert_eq!(code(delete_run(&app.state, id).await), "not_found");
+
+    let done = completed_run(&app).await;
+    assert_eq!(code(cancel_run(&app.state, &done).await), "validation");
+    for bad in ["not-a-uuid"] {
+        assert_eq!(code(cancel_run(&app.state, bad).await), "validation");
+        assert_eq!(code(delete_run(&app.state, bad).await), "validation");
+    }
+    let missing = Uuid::new_v4().to_string();
+    assert_eq!(code(cancel_run(&app.state, &missing).await), "not_found");
+}
+
 #[tokio::test]
 async fn compare_runs_returns_runs_with_metrics() {
     let app = app(true).await;
@@ -240,7 +279,7 @@ async fn compare_runs_returns_runs_with_metrics() {
 async fn start_run_without_a_loaded_model() {
     let mut app = app(true).await;
     app.state.benchmarks = Arc::new(BenchmarkService::new(
-        Registry::default(),
+        Registry::standard(fake_quality_deps()),
         Arc::new(InMemoryRuns::default()),
         Arc::new(FakeSession::empty()),
         None,

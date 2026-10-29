@@ -240,9 +240,184 @@ async fn failed_runs_keep_their_error() {
     assert!(stored.finished_at.is_some());
     assert!(store.metrics(run.id).await.unwrap().is_empty());
 
-    // Completing with no metrics skips the metrics insert.
-    store.complete(run.id, json!({}), &[]).await.unwrap();
+    // A failed run's status is final: completing it later changes nothing.
+    store
+        .complete(run.id, json!({}), &[Metric::new("tps", 1.0, "tok/s")])
+        .await
+        .unwrap();
+    let stored = RunRepository::get(&store, run.id).await.unwrap().unwrap();
+    assert_eq!(stored.status, RunStatus::Failed);
     assert!(store.metrics(run.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn cancelled_is_final_and_unfinished_runs_only() {
+    let (_dir, store) = store().await;
+    let (model_id, hardware_id) = model_and_hardware(&store).await;
+    let create = || {
+        store.create(new_run(
+            model_id,
+            hardware_id,
+            Category::ModelQuality,
+            "quality.math",
+        ))
+    };
+
+    // Cancelled while queued: the late `mark_running`, `complete` and `fail` are ignored.
+    let queued = create().await.unwrap();
+    assert!(store.cancel(queued.id).await.unwrap());
+    store.mark_running(queued.id).await.unwrap();
+    store
+        .complete(
+            queued.id,
+            json!({"late": true}),
+            &[Metric::new("accuracy", 90.0, "%")],
+        )
+        .await
+        .unwrap();
+    store.fail(queued.id, "late").await.unwrap();
+    let stored = RunRepository::get(&store, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.status, RunStatus::Cancelled);
+    assert!(stored.finished_at.is_some() && stored.started_at.is_none());
+    assert!(stored.details.is_none() && stored.error.is_none());
+    assert!(store.metrics(queued.id).await.unwrap().is_empty());
+    // Cancelling twice reports that nothing changed.
+    assert!(!store.cancel(queued.id).await.unwrap());
+
+    // Cancelled while running.
+    let running = create().await.unwrap();
+    store.mark_running(running.id).await.unwrap();
+    assert!(store.cancel(running.id).await.unwrap());
+    let stored = RunRepository::get(&store, running.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.status, RunStatus::Cancelled);
+    assert!(stored.started_at.is_some());
+
+    // A completed run can't be cancelled.
+    let done = create().await.unwrap();
+    store.complete(done.id, json!({}), &[]).await.unwrap();
+    assert!(!store.cancel(done.id).await.unwrap());
+    assert!(!store.cancel(Uuid::new_v4()).await.unwrap());
+}
+
+#[tokio::test]
+async fn delete_removes_the_run_and_its_metrics() {
+    let (dir, store) = store().await;
+    let (model_id, hardware_id) = model_and_hardware(&store).await;
+    let run = store
+        .create(new_run(
+            model_id,
+            hardware_id,
+            Category::InferencePerformance,
+            "inference.latency",
+        ))
+        .await
+        .unwrap();
+    store
+        .complete(run.id, json!({}), &[Metric::new("tps", 50.0, "tok/s")])
+        .await
+        .unwrap();
+
+    assert!(store.delete(run.id).await.unwrap());
+    assert!(RunRepository::get(&store, run.id).await.unwrap().is_none());
+    let pool = raw_pool(&dir).await;
+    let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM metrics")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert!(!store.delete(run.id).await.unwrap());
+}
+
+/// A database created before `0002_run_cancelled_status`, with a run and its metrics, keeps
+/// both after the upgrade, and the metrics still cascade with their run.
+#[tokio::test]
+async fn upgrading_to_cancelled_status_keeps_runs_metrics_and_cascade() {
+    let dir = tempfile::tempdir().unwrap();
+    let only_init = dir.path().join("migrations");
+    std::fs::create_dir(&only_init).unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/0001_init.sql"),
+        only_init.join("0001_init.sql"),
+    )
+    .unwrap();
+    let options = SqliteConnectOptions::from_str(&db_url(&dir))
+        .unwrap()
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = SqlitePool::connect_with(options).await.unwrap();
+    sqlx::migrate::Migrator::new(only_init.as_path())
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+
+    let run_id = Uuid::new_v4().hyphenated().to_string();
+    let model_id = Uuid::new_v4().hyphenated().to_string();
+    let hardware_id = Uuid::new_v4().hyphenated().to_string();
+    sqlx::query(
+        "INSERT INTO models (id, name, file_path, file_size_bytes, created_at)
+         VALUES (?1, 'old', '/m.gguf', 1, '2026-01-01T00:00:00Z')",
+    )
+    .bind(&model_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO hardware_profiles (id, cpu, ram_total_bytes, backend, fingerprint, created_at)
+         VALUES (?1, 'cpu', 1, 'cpu', 'fp', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&hardware_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO benchmark_runs (id, model_id, hardware_id, category, benchmark_name,
+             status, config, details, created_at)
+         VALUES (?1, ?2, ?3, 'inference_performance', 'inference.latency', 'completed',
+             '{\"a\":1}', '{\"b\":2}', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&run_id)
+    .bind(&model_id)
+    .bind(&hardware_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO metrics (run_id, name, value, unit) VALUES (?1, 'tps', 42.0, 'tok/s')",
+    )
+    .bind(&run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let store = SqliteStore::connect(&db_url(&dir)).await.expect("upgrade");
+    let id = Uuid::parse_str(&run_id).unwrap();
+    let run = RunRepository::get(&store, id).await.unwrap().unwrap();
+    assert_eq!(run.status, RunStatus::Completed);
+    assert_eq!(run.config, json!({"a": 1}));
+    assert_eq!(run.details, Some(json!({"b": 2})));
+    assert_eq!(store.metrics(id).await.unwrap()[0].value, 42.0);
+
+    let pool = raw_pool(&dir).await;
+    let (fk_problems,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pragma_foreign_key_check")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(fk_problems, 0);
+    assert!(store.delete(id).await.unwrap());
+    let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM metrics")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }
 
 #[tokio::test]

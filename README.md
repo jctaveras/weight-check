@@ -43,11 +43,26 @@ The database file is `weight-check.db` in the OS app data directory (on Linux `~
 |---|---|---|
 | Inference & Performance | `inference.generation_speed`, `inference.latency`, `inference.throughput` | ✅ |
 | Resource Efficiency | `resource.profile` | ✅ |
-| Model Intelligence & Quality | `quality.reasoning` | planned (`not_implemented`) |
+| Model Intelligence & Quality | `quality.knowledge`, `quality.math`, `quality.instruction_following`, `quality.coding` | ✅ |
 | Agentic Capabilities & Reliability | `agentic.tool_calling` | planned (`not_implemented`) |
 | Context Window & Scalability | `context.long_context` | planned (`not_implemented`) |
 
 The `benchmark_catalog` command returns each benchmark's default config. Pass overrides in the `config` field when starting a run.
+
+Quality benchmarks score a seeded sample (`limit`, default 200) of a public dataset:
+
+| Benchmark | Dataset | Score |
+|---|---|---|
+| `quality.knowledge` | MMLU (5-shot) or ARC-Challenge | `accuracy` from answer-letter probabilities |
+| `quality.math` | GSM8K | `accuracy`, exact match on the final number |
+| `quality.instruction_following` | IFEval | strict and loose, at the prompt and instruction level |
+| `quality.coding` | HumanEval or LiveCodeBench v6 (Jan–Apr 2025) | `pass_at_1` |
+
+Comparing quality runs:
+- Datasets are downloaded from Hugging Face on first use (LiveCodeBench is 134 MB), checked against a pinned sha256 and cached in `datasets/` in the app data directory.
+- Scores are only comparable between runs with the same benchmark config.
+- `quality.coding` runs model-written code on your machine through `PYTHON_BIN`. Each program gets a temp dir, an empty environment and a timeout, but it is not a security sandbox.
+- Perplexity is not offered. It is only meaningful between models that share a tokenizer, and llama-server can't score prompt tokens.
 
 GPU telemetry currently supports AMD GPUs through amdgpu sysfs (VRAM, busy %, power). On other GPUs the GPU metrics are omitted.
 
@@ -79,6 +94,9 @@ The UI talks to the core through Tauri commands (`invoke(name, args)`). Each ret
 | `list_runs` | `filter?: {model_id?, category?, benchmark?, limit?}` | runs, newest first |
 | `start_run` | `request: {benchmark_id, config?}` | the queued run |
 | `get_run` | `id: "<uuid>"` | the run with its metrics |
+| `cancel_run` | `id: "<uuid>"` | the run (it turns `cancelled` once it has stopped) |
+| `delete_run` | `id: "<uuid>"` | `null` (the run and its metrics are deleted) |
+| `compare_runs` | `ids: ["<uuid>", …]` | completed runs of one benchmark, with metrics |
 
 Errors reject with `{"code", "message"}`:
 
@@ -86,13 +104,17 @@ Errors reject with `{"code", "message"}`:
 |---|---|
 | Not found | `not_found` |
 | No model loaded | `no_model_loaded` |
-| Model busy with a run | `busy` |
+| Model busy with a run, or deleting the active run | `busy` |
 | Invalid payload | `validation` |
 | Benchmark not implemented yet | `not_implemented` |
 | llama-server failure | `llama_server` |
 | Database or internal failure | `internal` |
 
 Only one benchmark runs at a time. While a run is active, the model cannot be unloaded and the idle watchdog does not unload it.
+
+Runs go `queued` → `running` → `completed`, `failed` or `cancelled`, and a finished run's status never changes:
+- Cancelling stops in-flight llama-server requests and any running test programs.
+- Only finished runs can be deleted. Cancel an active run first.
 
 ## Configuration
 
@@ -104,6 +126,7 @@ Read from the app's process environment at startup (see [`.env.example`](.env.ex
 | `MODELS_DIR` | `./models` | scanned non-recursively; `mmproj` files are skipped |
 | `IDLE_TIMEOUT_SECS` | `600` | `0` disables auto-unload |
 | `LLAMA_LOAD_TIMEOUT_SECS` | `300` | |
+| `PYTHON_BIN` | `python3` | runs model-written code in `quality.coding` |
 | `RUST_LOG` | `weight_check_lib=info,weight_check_core=info` | |
 
 ## Tests

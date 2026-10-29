@@ -1,6 +1,7 @@
 //! Benchmark contract and the catalog of available benchmarks.
 
 pub mod inference;
+pub mod quality;
 pub mod resource;
 pub mod stats;
 pub mod stubs;
@@ -83,6 +84,7 @@ pub fn completion_request(prompt: &str, n_predict: u32, seed: i64) -> Completion
         seed,
         cache_prompt: false,
         ignore_eos: true,
+        n_probs: None,
     }
 }
 
@@ -142,13 +144,18 @@ impl Registry {
     }
 }
 
-impl Default for Registry {
-    fn default() -> Self {
+impl Registry {
+    /// Every benchmark the app offers.
+    pub fn standard(quality: quality::QualityDeps) -> Self {
         let mut benchmarks: Vec<Arc<dyn Benchmark>> = vec![
             Arc::new(inference::GenerationSpeed),
             Arc::new(inference::Latency),
             Arc::new(inference::Throughput),
             Arc::new(resource::ResourceProfile),
+            Arc::new(quality::Knowledge::new(quality.clone())),
+            Arc::new(quality::Math::new(quality.clone())),
+            Arc::new(quality::InstructionFollowing::new(quality.clone())),
+            Arc::new(quality::Coding::new(quality)),
         ];
         benchmarks.extend(stubs::all());
         Self::new(benchmarks)

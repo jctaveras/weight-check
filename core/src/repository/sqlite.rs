@@ -13,6 +13,7 @@ use uuid::fmt::Hyphenated;
 use super::{HardwareRepository, HealthRepository, ModelRepository, RunRepository};
 use crate::domain::{
     HardwareProfile, Metric, ModelInfo, NewHardwareProfile, NewModel, NewRun, Run, RunFilter,
+    RunStatus,
 };
 use crate::error::{AppError, AppResult};
 
@@ -250,8 +251,8 @@ impl RunRepository for SqliteStore {
     async fn create(&self, run: NewRun) -> AppResult<Run> {
         let sql = format!(
             "INSERT INTO benchmark_runs (id, model_id, hardware_id, category, benchmark_name, \
-                                         config, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                                         status, config, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              RETURNING {RUN_COLUMNS}"
         );
         sqlx::query_as::<_, RunRow>(&sql)
@@ -260,6 +261,7 @@ impl RunRepository for SqliteStore {
             .bind(run.hardware_id.hyphenated())
             .bind(run.category.as_str())
             .bind(&run.benchmark_name)
+            .bind(RunStatus::Queued.as_str())
             .bind(Json(&run.config))
             .bind(Utc::now())
             .fetch_one(&self.pool)

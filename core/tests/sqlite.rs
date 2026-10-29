@@ -334,31 +334,34 @@ async fn delete_removes_the_run_and_its_metrics() {
     assert!(!store.delete(run.id).await.unwrap());
 }
 
-/// A database created before `0002_run_cancelled_status`, with a run and its metrics, keeps
-/// both after the upgrade, and the metrics still cascade with their run.
-#[tokio::test]
-async fn upgrading_to_cancelled_status_keeps_runs_metrics_and_cascade() {
-    let dir = tempfile::tempdir().unwrap();
-    let only_init = dir.path().join("migrations");
-    std::fs::create_dir(&only_init).unwrap();
-    std::fs::copy(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/0001_init.sql"),
-        only_init.join("0001_init.sql"),
-    )
-    .unwrap();
-    let options = SqliteConnectOptions::from_str(&db_url(&dir))
+/// A raw pool over a new database with only the given migrations applied, to seed rows the
+/// way an older version of the app left them before `SqliteStore::connect` upgrades it.
+async fn pool_migrated_with(dir: &TempDir, migrations: &[&str]) -> SqlitePool {
+    let subset = dir.path().join("migrations");
+    std::fs::create_dir(&subset).unwrap();
+    for file in migrations {
+        std::fs::copy(
+            format!("{}/migrations/{file}", env!("CARGO_MANIFEST_DIR")),
+            subset.join(file),
+        )
+        .unwrap();
+    }
+    let options = SqliteConnectOptions::from_str(&db_url(dir))
         .unwrap()
         .create_if_missing(true)
         .foreign_keys(true);
     let pool = SqlitePool::connect_with(options).await.unwrap();
-    sqlx::migrate::Migrator::new(only_init.as_path())
+    sqlx::migrate::Migrator::new(subset.as_path())
         .await
         .unwrap()
         .run(&pool)
         .await
         .unwrap();
+    pool
+}
 
-    let run_id = Uuid::new_v4().hyphenated().to_string();
+/// Inserts a model and a hardware profile with raw SQL and returns their ids.
+async fn seed_model_and_hardware(pool: &SqlitePool) -> (String, String) {
     let model_id = Uuid::new_v4().hyphenated().to_string();
     let hardware_id = Uuid::new_v4().hyphenated().to_string();
     sqlx::query(
@@ -366,7 +369,7 @@ async fn upgrading_to_cancelled_status_keeps_runs_metrics_and_cascade() {
          VALUES (?1, 'old', '/m.gguf', 1, '2026-01-01T00:00:00Z')",
     )
     .bind(&model_id)
-    .execute(&pool)
+    .execute(pool)
     .await
     .unwrap();
     sqlx::query(
@@ -374,28 +377,54 @@ async fn upgrading_to_cancelled_status_keeps_runs_metrics_and_cascade() {
          VALUES (?1, 'cpu', 1, 'cpu', 'fp', '2026-01-01T00:00:00Z')",
     )
     .bind(&hardware_id)
-    .execute(&pool)
+    .execute(pool)
     .await
     .unwrap();
+    (model_id, hardware_id)
+}
+
+/// Inserts a run with the given status and one metric with raw SQL and returns the run id.
+async fn seed_run(pool: &SqlitePool, model_id: &str, hardware_id: &str, status: &str) -> String {
+    let run_id = Uuid::new_v4().hyphenated().to_string();
     sqlx::query(
         "INSERT INTO benchmark_runs (id, model_id, hardware_id, category, benchmark_name,
              status, config, details, created_at)
-         VALUES (?1, ?2, ?3, 'inference_performance', 'inference.latency', 'completed',
+         VALUES (?1, ?2, ?3, 'inference_performance', 'inference.latency', ?4,
              '{\"a\":1}', '{\"b\":2}', '2026-01-01T00:00:00Z')",
     )
     .bind(&run_id)
-    .bind(&model_id)
-    .bind(&hardware_id)
-    .execute(&pool)
+    .bind(model_id)
+    .bind(hardware_id)
+    .bind(status)
+    .execute(pool)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO metrics (run_id, name, value, unit) VALUES (?1, 'tps', 42.0, 'tok/s')",
     )
     .bind(&run_id)
-    .execute(&pool)
+    .execute(pool)
     .await
     .unwrap();
+    run_id
+}
+
+async fn foreign_key_problems(pool: &SqlitePool) -> i64 {
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pragma_foreign_key_check")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    n
+}
+
+/// A database created before `0002_run_cancelled_status`, with a run and its metrics, keeps
+/// both after the upgrade, and the metrics still cascade with their run.
+#[tokio::test]
+async fn upgrading_to_cancelled_status_keeps_runs_metrics_and_cascade() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = pool_migrated_with(&dir, &["0001_init.sql"]).await;
+    let (model_id, hardware_id) = seed_model_and_hardware(&pool).await;
+    let run_id = seed_run(&pool, &model_id, &hardware_id, "completed").await;
     pool.close().await;
 
     let store = SqliteStore::connect(&db_url(&dir)).await.expect("upgrade");
@@ -407,12 +436,48 @@ async fn upgrading_to_cancelled_status_keeps_runs_metrics_and_cascade() {
     assert_eq!(store.metrics(id).await.unwrap()[0].value, 42.0);
 
     let pool = raw_pool(&dir).await;
-    let (fk_problems,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pragma_foreign_key_check")
+    assert_eq!(foreign_key_problems(&pool).await, 0);
+    assert!(store.delete(id).await.unwrap());
+    let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM metrics")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(fk_problems, 0);
-    assert!(store.delete(id).await.unwrap());
+    assert_eq!(left, 0);
+}
+
+/// A database created before `0003_run_status_table` keeps every run's status, its metrics and
+/// the cascade once `status` references `run_statuses`.
+#[tokio::test]
+async fn upgrading_to_status_table_keeps_runs_and_metrics() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = pool_migrated_with(&dir, &["0001_init.sql", "0002_run_cancelled_status.sql"]).await;
+    let (model_id, hardware_id) = seed_model_and_hardware(&pool).await;
+    let mut runs = Vec::new();
+    for status in [
+        RunStatus::Queued,
+        RunStatus::Running,
+        RunStatus::Completed,
+        RunStatus::Failed,
+        RunStatus::Cancelled,
+    ] {
+        let id = seed_run(&pool, &model_id, &hardware_id, status.as_str()).await;
+        runs.push((Uuid::parse_str(&id).unwrap(), status));
+    }
+    pool.close().await;
+
+    let store = SqliteStore::connect(&db_url(&dir)).await.expect("upgrade");
+    for (id, status) in &runs {
+        let run = RunRepository::get(&store, *id).await.unwrap().unwrap();
+        assert_eq!(run.status, *status);
+        assert_eq!(run.config, json!({"a": 1}));
+        assert_eq!(store.metrics(*id).await.unwrap()[0].value, 42.0);
+    }
+
+    let pool = raw_pool(&dir).await;
+    assert_eq!(foreign_key_problems(&pool).await, 0);
+    for (id, _) in &runs {
+        assert!(store.delete(*id).await.unwrap());
+    }
     let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM metrics")
         .fetch_one(&pool)
         .await
@@ -617,8 +682,68 @@ async fn check_constraints_reject_unknown_enum_values() {
     let bad_category = insert("not_a_category", "queued").await.unwrap_err();
     assert!(bad_category.to_string().contains("CHECK"), "{bad_category}");
     let bad_status = insert("agentic", "paused").await.unwrap_err();
-    assert!(bad_status.to_string().contains("CHECK"), "{bad_status}");
+    assert!(
+        bad_status.to_string().contains("FOREIGN KEY"),
+        "{bad_status}"
+    );
     insert("agentic", "queued").await.unwrap();
+}
+
+#[tokio::test]
+async fn run_status_cannot_be_null() {
+    let (dir, store) = store().await;
+    let (model_id, hardware_id) = model_and_hardware(&store).await;
+    let pool = raw_pool(&dir).await;
+
+    let insert = sqlx::query(
+        "INSERT INTO benchmark_runs (id, model_id, hardware_id, category, benchmark_name, \
+                                     status, created_at)
+         VALUES (?1, ?2, ?3, 'agentic', 'x', NULL, '2026-01-01T00:00:00Z')",
+    )
+    .bind(Uuid::new_v4().hyphenated())
+    .bind(model_id.hyphenated())
+    .bind(hardware_id.hyphenated())
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert!(insert.to_string().contains("NOT NULL"), "{insert}");
+
+    let run = store
+        .create(new_run(model_id, hardware_id, Category::Agentic, "x"))
+        .await
+        .unwrap();
+    let update = sqlx::query("UPDATE benchmark_runs SET status = NULL WHERE id = ?1")
+        .bind(run.id.hyphenated())
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert!(update.to_string().contains("NOT NULL"), "{update}");
+}
+
+/// The point of `run_statuses`: a new status needs only a row there, not a table rebuild.
+#[tokio::test]
+async fn new_status_needs_only_an_insert() {
+    let (dir, store) = store().await;
+    let (model_id, hardware_id) = model_and_hardware(&store).await;
+    let pool = raw_pool(&dir).await;
+    let insert = || {
+        sqlx::query(
+            "INSERT INTO benchmark_runs (id, model_id, hardware_id, category, benchmark_name, \
+                                         status, created_at)
+             VALUES (?1, ?2, ?3, 'agentic', 'x', 'paused', '2026-01-01T00:00:00Z')",
+        )
+        .bind(Uuid::new_v4().hyphenated())
+        .bind(model_id.hyphenated())
+        .bind(hardware_id.hyphenated())
+        .execute(&pool)
+    };
+
+    insert().await.unwrap_err();
+    sqlx::query("INSERT INTO run_statuses (name) VALUES ('paused')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    insert().await.unwrap();
 }
 
 #[tokio::test]

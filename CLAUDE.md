@@ -31,6 +31,10 @@ cargo cov-html                               # HTML report in target/llvm-cov/ht
 - The database is an embedded SQLite file, `weight-check.db` in the OS app data directory (`app.path().app_data_dir()`, e.g. `~/.local/share/dev.weightcheck.app/` on Linux), created if missing and opened with foreign keys on and WAL journaling.
 - Migrations in `core/migrations/` are applied automatically at startup via `sqlx::migrate!` (inside `SqliteStore::connect`/`open`). Schema changes go in new numbered files; never edit an applied one.
 - `0002_run_cancelled_status.sql` rebuilds `benchmark_runs` and `metrics` to allow the `cancelled` status. Changing a CHECK constraint means rebuilding the table, and the child table must be rebuilt first: dropping a parent that still has `ON DELETE CASCADE` children deletes their rows.
+- `0003_run_status_table.sql` replaces the status CHECK with a `run_statuses` lookup table that `benchmark_runs.status` references, so a new status is an `INSERT INTO run_statuses` migration, not a rebuild.
+  - Enum-like columns that may grow follow this pattern: a lookup table with a TEXT natural key (`name TEXT PRIMARY KEY`) and an FK, so stored values stay readable and need no joins.
+  - Retrofitting one onto an existing column avoids a rebuild: `ADD COLUMN` (an added `REFERENCES` column must default to NULL), backfill with `UPDATE`, `DROP COLUMN` the old one, `RENAME COLUMN` the new one. NOT NULL is then enforced by `BEFORE INSERT`/`BEFORE UPDATE OF` triggers, and inserts must bind the value (no column DEFAULT).
+  - A new value still needs the Rust enum (`as_str`/`FromStr`, e.g. `domain::RunStatus`) and `ui/src/lib/api/types.ts` updated.
 
 ## Architecture
 
@@ -45,7 +49,7 @@ The Rust code uses a strict layered architecture. Respect the boundaries:
 - **`core/src/service/`** holds all logic and depends only on repository **traits** and infra traits, never on sqlx or reqwest types directly.
 - **`core/src/repository/`** contains the traits (`mod.rs`) and `SqliteStore` (`sqlite.rs`), which implements all of them.
   - Queries are runtime-checked (`query_as`), not `query!` macros, so builds don't need a live DB.
-  - SQLite has no enum, UUID, timestamp or JSON types. Category and status are TEXT columns guarded by `CHECK (... IN (...))`; UUIDs are bound and read as hyphenated TEXT (`uuid::fmt::Hyphenated`); timestamps are bound from Rust (`Utc::now()`, never SQL `now()`) as RFC 3339 TEXT; JSON goes through `sqlx::types::Json`. Placeholders are `?N`. The `domain` types stay free of sqlx.
+  - SQLite has no enum, UUID, timestamp or JSON types. Category is a TEXT column guarded by `CHECK (... IN (...))`, and status is TEXT referencing the `run_statuses` lookup table; UUIDs are bound and read as hyphenated TEXT (`uuid::fmt::Hyphenated`); timestamps are bound from Rust (`Utc::now()`, never SQL `now()`) as RFC 3339 TEXT; JSON goes through `sqlx::types::Json`. Placeholders are `?N`. The `domain` types stay free of sqlx.
 - **`core/src/infra/`** holds the adapters the services use:
   - `llama/`: the `ServerLauncher`, `RunningServer` and `LlamaApi` traits, plus the real llama-server process and HTTP client.
   - `monitor/`: `GpuMonitor` (AMD via amdgpu sysfs; this is where NVML would be added) and `HostMonitor` (sysinfo).
